@@ -17,6 +17,7 @@ client_identity = None
 ui_ref = None
 
 message_queue = queue.Queue()
+announcement_queue = queue.Queue()
 
 _old_log = RNS.log
 
@@ -42,6 +43,59 @@ def load_or_create_identity(identity_path):
         identity.to_file(identity_path)
         RNS.log(f"[CLIENT] Created new Identity and saved to {identity_path}")
     return identity
+
+class AnnounceHandler:
+    def __init__(self, aspect_filter=None):
+        """
+        Initialize the Announce Handler.
+        
+        Args:
+            aspect_filter (str, optional): Specific aspect to filter announces.
+                If None, all announces are processed.
+        """
+        self.aspect_filter = aspect_filter
+
+    def received_announce(self, destination_hash, announced_identity, app_data):
+        """
+        Callback method invoked when an announce matching the filter is received.
+        
+        Args:
+            destination_hash (bytes): Hash of the announcing destination.
+            announced_identity (RNS.Identity): Identity of the announcing destination.
+            app_data (bytes): Application-specific data included in the announce.
+        """
+        # Convert the destination hash to a readable format
+        dest_hash_str = RNS.prettyhexrep(destination_hash)
+        
+        # Decode the app_data if present
+        app_data_str = app_data.decode("utf-8", "ignore") if app_data else "No App Data"
+        
+        # Format the announce message
+        #announce_message = f"[ANNOUNCE] From {dest_hash_str}: {app_data_str}"
+        announce_message = f"{dest_hash_str}:\n {app_data_str}"
+        
+        # Enqueue the announce message to the announcement_queue
+        announcement_queue.put(announce_message)
+        
+        # OPTIONAL: Log the announce
+        #RNS.log(f"[ANNOUNCE HANDLER] Received announce: {announce_message}")
+
+def register_announce_handler():
+    """
+    Registers the announce handler with Reticulum's transport.
+    """
+    # Initialize the announce handler with an aspect filter if needed
+    # For example, to filter announces from a specific application aspect:
+    # aspect_filter = "example_utilities.announcesample.fruits"
+    #aspect_filter = None  # Set to None to accept all announces
+    aspect_filter = aspect_filter="retibbs.bbs"
+
+    announce_handler = AnnounceHandler(aspect_filter=aspect_filter)
+    
+    # Register the announce handler
+    RNS.Transport.register_announce_handler(announce_handler)
+    
+    RNS.log("[CLIENT] Announce handler registered.")
 
 def client_setup(server_hexhash, configpath, identity_file):
     """
@@ -93,6 +147,9 @@ def client_setup(server_hexhash, configpath, identity_file):
     link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
     link.set_resource_started_callback(resource_started_callback)
     link.set_resource_concluded_callback(resource_concluded_callback)
+
+    # Register the announce handler
+    register_announce_handler()
 
     RNS.log("[CLIENT] Establishing link with server...")
 
@@ -202,6 +259,15 @@ class BBSClientUI:
             # Optional: Add a title or other decorations
         )
 
+        # Initialize message walker and listbox for announcements
+        self.announcement_walker = urwid.SimpleListWalker([])
+        self.announcement_listbox = urwid.ListBox(self.announcement_walker)
+        self.announcement_listbox_box = urwid.LineBox(
+            self.announcement_listbox,
+            title="Announces",
+            title_align='left'
+        )
+
         # Define the command prompt text
         self.prompt_text = f"Command [Board: {self.current_board}]"
         self.command_title = urwid.Text(self.prompt_text)
@@ -228,22 +294,35 @@ class BBSClientUI:
             title=None 
         )
 
+        # Assemble the body with messages and announcements side by side
+        self.body = urwid.Columns([
+            ('weight', 3, self.message_listbox_box),
+            ('weight', 1, self.announcement_listbox_box)
+        ], dividechars=1, min_width=40)
+
         # Assemble the frame with header, body, and footer
         self.frame = urwid.Frame(
             header=urwid.Text("- RetiBBS -", align='center'),
-            body=self.message_listbox_box,
+            body=urwid.Pile([
+                self.body
+            ]),
             footer=self.footer
         )
 
         # Initialize the MainLoop
         self.loop = urwid.MainLoop(
             self.frame,
-            palette=[('reversed', 'standout', '')],
+            palette=[
+                ('reversed', 'standout', ''),
+                ('announcement', 'dark cyan', ''),
+                ('error', 'dark red', ''),
+                # Add more styles as needed
+            ],
             unhandled_input=self.handle_input
         )
 
         # Set up periodic polling of the message queue
-        self.loop.set_alarm_in(0.1, self.poll_message_queue)
+        self.loop.set_alarm_in(0.1, self.poll_message_queues)
 
         # Display initial usage instructions
         self.show_usage_instructions()
@@ -297,15 +376,24 @@ class BBSClientUI:
         elif key in ("ctrl c",):
             self.tear_down()
 
-    def poll_message_queue(self, loop, user_data):
+    def poll_message_queues(self, loop, user_data):
         while not message_queue.empty():
             msg = message_queue.get_nowait()
             self.add_line(msg)
-        loop.set_alarm_in(0.1, self.poll_message_queue)
+        while not announcement_queue.empty():
+            ann = announcement_queue.get_nowait()
+            self.add_announcement(ann)
+        loop.set_alarm_in(0.1, self.poll_message_queues)
 
     def add_line(self, text):
         self.message_walker.append(urwid.Text(text))
         self.message_listbox.focus_position = len(self.message_walker) - 1
+    
+    def add_announcement(self, text):
+        # Format announcements differently, e.g., with a prefix or different color
+        formatted_ann = urwid.Text(('announcement', text))
+        self.announcement_walker.append(formatted_ann)
+        self.announcement_listbox.focus_position = len(self.announcement_walker) - 1
 
     def show_usage_instructions(self):
         """
