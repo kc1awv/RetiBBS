@@ -2,8 +2,10 @@
 import time
 import sqlite3
 import threading
-import os
-import RNS  # Ensure RNS is imported to use RNS.log
+
+from datetime import datetime, timezone
+
+import RNS
 
 class BoardsManager:
     """
@@ -105,25 +107,22 @@ class BoardsManager:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
                 cursor = conn.cursor()
 
-                # Get board_id
                 cursor.execute("SELECT id FROM boards WHERE name = ?;", (board_name,))
                 result = cursor.fetchone()
                 if not result:
-                    # Auto-create the board if it doesn't exist
                     cursor.execute("INSERT INTO boards (name) VALUES (?);", (board_name,))
                     board_id = cursor.lastrowid
                     RNS.log(f"[BoardsManager] Auto-created board '{board_name}'")
                 else:
                     board_id = result[0]
 
-                # Insert the message
-                timestamp = time.time()
+                timestamp = datetime.now(timezone.utc).timestamp()
                 cursor.execute("""
                     INSERT INTO messages (board_id, timestamp, author, content)
                     VALUES (?, ?, ?, ?);
                 """, (board_id, timestamp, author, content))
                 conn.commit()
-                RNS.log(f"[BoardsManager] New message posted to '{board_name}' by '{author}'")
+                RNS.log(f"[BoardsManager] New message posted to '{board_name}' by '{author}' at {timestamp} UTC")
             except Exception as e:
                 RNS.log(f"[BoardsManager] Error posting message to '{board_name}': {e}", RNS.LOG_ERROR)
             finally:

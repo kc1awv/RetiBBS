@@ -125,7 +125,6 @@ def client_packet_received(message_bytes, packet):
     text = message_bytes.decode("utf-8", "ignore")
     message_queue.put("[SERVER-PACKET]\n" + text)
 
-    # Parse the message to detect board joins or state changes
     match = re.search(r"You have joined board '(.+)'", text)
     if match:
         board_name = match.group(1)
@@ -160,7 +159,6 @@ def resource_concluded_callback(resource):
         text = data.decode("utf-8", "ignore")
         message_queue.put("[SERVER-RESOURCE]\n" + text)
 
-        # Parse the message to detect board joins
         match = re.search(r"You have joined board '(.+)'", text)
         if match:
             board_name = match.group(1)
@@ -175,7 +173,7 @@ def link_established(link):
     server_link = link
 
 def link_closed(link):
-    RNS.log("[CLIENT] Link was closed or lost. Exiting.")
+    RNS.log("\n[CLIENT] Link was closed or lost. Exiting.")
     RNS.Reticulum.exit_handler()
     time.sleep(1)
     sys.exit(0)
@@ -194,41 +192,60 @@ class BBSClientUI:
     def __init__(self, link):
         self.link = link
         self.receiving_data = False
-        self.current_board = None
+        self.current_board = "None"
 
+        # Initialize message walker and listbox
         self.message_walker = urwid.SimpleListWalker([])
         self.message_listbox = urwid.ListBox(self.message_walker)
         self.message_listbox_box = urwid.LineBox(
             self.message_listbox,
-            #title="Client",  # optional title
+            # Optional: Add a title or other decorations
         )
 
-        self.command_title = urwid.Text(f"Command [Board: {self.current_board}] > ")
+        # Define the command prompt text
+        self.prompt_text = f"Command [Board: {self.current_board}]"
+        self.command_title = urwid.Text(self.prompt_text)
+
+        # Define the input prompt and edit box
+        self.input_prompt = urwid.Text("> ")
         self.input_edit = urwid.Edit()
+
+        # Combine the input prompt and edit box into columns
         self.input_edit_box = urwid.Columns([
-            ('weight', 0.3, self.command_title),
+            ('fixed', len("> "), self.input_prompt),
             ('weight', 1, self.input_edit)
         ], dividechars=1, min_width=1)
 
+        # Create a Pile to stack the command prompt and input field vertically
+        self.input_pile = urwid.Pile([
+            self.command_title,
+            self.input_edit_box
+        ])
+
+        # Create a LineBox for the footer containing the input pile
         self.footer = urwid.LineBox(
-            self.input_edit_box,
+            self.input_pile,
             title=None 
         )
 
+        # Assemble the frame with header, body, and footer
         self.frame = urwid.Frame(
             header=urwid.Text("- RetiBBS -", align='center'),
             body=self.message_listbox_box,
-            footer=self.input_edit_box
+            footer=self.footer
         )
 
+        # Initialize the MainLoop
         self.loop = urwid.MainLoop(
             self.frame,
             palette=[('reversed', 'standout', '')],
             unhandled_input=self.handle_input
         )
 
+        # Set up periodic polling of the message queue
         self.loop.set_alarm_in(0.1, self.poll_message_queue)
 
+        # Display initial usage instructions
         self.show_usage_instructions()
 
     def set_receiving_data(self, is_receiving):
@@ -239,15 +256,18 @@ class BBSClientUI:
         self.receiving_data = is_receiving
         if is_receiving:
             self.input_edit.set_edit_text("Receiving Data...")
+            self.input_edit.set_edit_pos(len("Receiving Data..."))
         else:
             self.input_edit.set_edit_text("")
+            self.input_edit.set_edit_pos(0)
 
     def set_current_board(self, board_name):
         """
         Update the current board and modify the command title.
         """
         self.current_board = board_name
-        self.command_title.set_text(f"Command [Board: {self.current_board}] > ")
+        self.prompt_text = f"Command [Board: {self.current_board}]"
+        self.command_title.set_text(self.prompt_text)
 
     def run(self):
         self.loop.run()
@@ -256,7 +276,7 @@ class BBSClientUI:
         if self.receiving_data:
             return
 
-        if key == "enter":
+        if key in ("enter", "shift enter"):
             user_command = self.input_edit.edit_text.strip()
             self.input_edit.set_edit_text("")
             if not user_command:
@@ -274,8 +294,8 @@ class BBSClientUI:
                 self.add_line(f"> {user_command}")
             else:
                 self.add_line(f"[ERROR] Data size {len(data)} exceeds MDU!")
-        else:
-            pass
+        elif key in ("ctrl c",):
+            self.tear_down()
 
     def poll_message_queue(self, loop, user_data):
         while not message_queue.empty():
@@ -286,12 +306,12 @@ class BBSClientUI:
     def add_line(self, text):
         self.message_walker.append(urwid.Text(text))
         self.message_listbox.focus_position = len(self.message_walker) - 1
-    
+
     def show_usage_instructions(self):
         """
         Print usage instructions for the user.
         """
-        self.add_line("[CLIENT] Ready:")
+        self.add_line("Client Ready!")
         self.add_line("  ? | help to show command help")
         self.add_line("  quit with 'q', 'quit', 'e', or 'exit'")
 
