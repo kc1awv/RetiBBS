@@ -85,7 +85,8 @@ def server_setup(configpath, identity_file, auth_file):
         RNS.Destination.IN,
         RNS.Destination.SINGLE,
         APP_NAME,
-        SERVICE_NAME
+        SERVICE_NAME,
+        "server"
     )
     server_destination.set_link_established_callback(client_connected)
 

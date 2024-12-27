@@ -135,7 +135,8 @@ def client_setup(server_hexhash, configpath, identity_file):
         RNS.Destination.OUT,
         RNS.Destination.SINGLE,
         APP_NAME,
-        SERVICE_NAME
+        SERVICE_NAME,
+        "client"
     )
 
     link = RNS.Link(server_destination)
