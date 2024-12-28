@@ -74,7 +74,7 @@ def is_name_taken(name, own_hash_hex=None):
             return True
     return False
 
-def server_setup(configpath, identity_file, auth_file):
+def server_setup(configpath, identity_file, auth_file, server_name):
     global authorized_users, boards_mgr
 
     reticulum = RNS.Reticulum(configpath)
@@ -85,8 +85,7 @@ def server_setup(configpath, identity_file, auth_file):
         RNS.Destination.IN,
         RNS.Destination.SINGLE,
         APP_NAME,
-        SERVICE_NAME,
-        "server"
+        SERVICE_NAME
     )
     server_destination.set_link_established_callback(client_connected)
 
@@ -96,7 +95,8 @@ def server_setup(configpath, identity_file, auth_file):
 
     while True:
         input()
-        server_destination.announce()
+        announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
+        server_destination.announce(app_data=announce_data)
         RNS.log("[Server] Sent announce from " + RNS.prettyhexrep(server_destination.hash))
 
 def client_connected(link):
@@ -423,11 +423,32 @@ if __name__ == "__main__":
             help="Path to store or load authorized user data",
             type=str
         )
+        parser.add_argument(
+            "--config-file",
+            action="store",
+            default="server_config.json",
+            help="Path to server configuration file (JSON)",
+            type=str
+        )
         args = parser.parse_args()
 
         auth_file_path = args.auth_file
 
-        server_setup(args.config, args.identity_file, args.auth_file)
+        # Load server configuration
+        if os.path.isfile(args.config_file):
+            try:
+                with open(args.config_file, "r", encoding="utf-8") as f:
+                    server_config = json.load(f)
+                server_name = server_config.get("server_name", "RetibBS Server")
+                RNS.log(f"[Server] Loaded server name: '{server_name}' from {args.config_file}")
+            except Exception as e:
+                RNS.log(f"[Server] Could not load server configuration: {e}", RNS.LOG_ERROR)
+                server_name = "RetibBS Server"  # Fallback to default name
+        else:
+            RNS.log(f"[Server] Configuration file {args.config_file} not found. Using default server name.", RNS.LOG_WARNING)
+            server_name = "RetibBS Server"  # Default server name
+
+        server_setup(args.config, args.identity_file, args.auth_file, server_name)
 
     except KeyboardInterrupt:
         print("")
