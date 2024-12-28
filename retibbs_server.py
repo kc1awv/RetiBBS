@@ -3,6 +3,8 @@ import argparse
 import os
 import time
 import json
+import sys
+import threading
 import RNS
 
 from boards import BoardsManager
@@ -13,6 +15,26 @@ SERVICE_NAME = "bbs"
 boards_mgr = BoardsManager()
 authorized_users = {}
 latest_client_link = None
+
+announce_interval = None
+
+class AutomaticAnnouncer(threading.Thread):
+    def __init__(self, server_destination, interval):
+        super().__init__()
+        self.server_destination = server_destination
+        self.interval = interval
+        self.stop_event = threading.Event()
+        self.daemon = True
+
+    def run(self):
+        while not self.stop_event.is_set():
+            time.sleep(self.interval)
+            announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
+            self.server_destination.announce(app_data=announce_data)
+            RNS.log("[Server] Sent automatic announce")
+
+    def stop(self):
+        self.stop_event.set()
 
 def load_or_create_identity(identity_path):
     """
@@ -74,7 +96,7 @@ def is_name_taken(name, own_hash_hex=None):
             return True
     return False
 
-def server_setup(configpath, identity_file, auth_file):
+def server_setup(configpath, identity_file, auth_file, server_name, announce_interval):
     global authorized_users, boards_mgr
 
     reticulum = RNS.Reticulum(configpath)
@@ -93,10 +115,43 @@ def server_setup(configpath, identity_file, auth_file):
     RNS.log(f"[Server] Loaded {len(authorized_users)} authorized users.")
     RNS.log("[Server] Press Enter to send an ANNOUNCE. Ctrl-C to quit.")
 
-    while True:
-        input()
-        server_destination.announce()
-        RNS.log("[Server] Sent announce from " + RNS.prettyhexrep(server_destination.hash))
+    if announce_interval > 0:
+        announcer = AutomaticAnnouncer(server_destination, announce_interval)
+        announcer.start()
+        RNS.log(f"[Server] Automatic announce set to every {announce_interval} seconds.")
+
+    try:
+        while True:
+            input()
+            announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
+            server_destination.announce(app_data=announce_data)
+            RNS.log("[Server] Sent announce from " + RNS.prettyhexrep(server_destination.hash))
+    except KeyboardInterrupt:
+        RNS.log("[Server] Shutdown initiated. Stopping automatic announcer...")
+        if announce_interval > 0:
+            announcer.stop()
+            announcer.join()
+        RNS.log("[Server] Shutting down Reticulum...")
+        RNS.Reticulum.exit_handler()
+        RNS.log("[Server] Server stopped gracefully.")
+        sys.exit(0)
+
+def start_automatic_announce(server_destination):
+    """
+    Starts a timer to send automatic announces at the configured interval.
+    """
+    def send_announce():
+        # Send an announce
+        announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
+        server_destination.announce(app_data=announce_data)
+        RNS.log("[Server] Sent automatic announce")
+
+        # Schedule the next announce
+        if announce_interval > 0:
+            threading.Timer(announce_interval, send_announce).start()
+
+    # Start the first announce
+    send_announce()
 
 def client_connected(link):
     global latest_client_link
@@ -354,7 +409,6 @@ def handle_join_board(packet, user_hash_hex, board_name):
     if current == board_name:
         reply = f"You are already in board '{board_name}'\n"
     else:
-        #boards_mgr.create_board(board_name)
         user_info["current_board"] = board_name
         reply = f"You have joined board '{board_name}'\n"
 
@@ -422,11 +476,34 @@ if __name__ == "__main__":
             help="Path to store or load authorized user data",
             type=str
         )
+        parser.add_argument(
+            "--config-file",
+            action="store",
+            default="server_config.json",
+            help="Path to server configuration file (JSON)",
+            type=str
+        )
         args = parser.parse_args()
 
         auth_file_path = args.auth_file
 
-        server_setup(args.config, args.identity_file, args.auth_file)
+        if os.path.isfile(args.config_file):
+            try:
+                with open(args.config_file, "r", encoding="utf-8") as f:
+                    server_config = json.load(f)
+                server_name = server_config.get("server_name", "RetiBBS Server")
+                announce_interval = server_config.get("announce_interval", 0)
+                RNS.log(f"[Server] Loaded server name: '{server_name}' from {args.config_file}")
+            except Exception as e:
+                RNS.log(f"[Server] Could not load server configuration: {e}", RNS.LOG_ERROR)
+                server_name = "RetibBS Server"  # Fallback to default name
+                announce_interval = 0   # Fallback to no announce
+        else:
+            RNS.log(f"[Server] Configuration file {args.config_file} not found. Using defaults.", RNS.LOG_WARNING)
+            server_name = "RetiBBS Server"  # Default server name
+            announce_interval = 0
+
+        server_setup(args.config, args.identity_file, args.auth_file, server_name, announce_interval)
 
     except KeyboardInterrupt:
         print("")

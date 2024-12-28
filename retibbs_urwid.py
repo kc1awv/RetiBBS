@@ -6,6 +6,7 @@ import re
 import sys
 import time
 import urwid
+import json
 
 import RNS
 
@@ -17,6 +18,7 @@ client_identity = None
 ui_ref = None
 
 message_queue = queue.Queue()
+announcement_queue = queue.Queue()
 
 _old_log = RNS.log
 
@@ -42,6 +44,65 @@ def load_or_create_identity(identity_path):
         identity.to_file(identity_path)
         RNS.log(f"[CLIENT] Created new Identity and saved to {identity_path}")
     return identity
+
+class AnnounceHandler:
+    def __init__(self, aspect_filter=None):
+        """
+        Initialize the Announce Handler.
+        
+        Args:
+            aspect_filter (str, optional): Specific aspect to filter announces.
+                If None, all announces are processed.
+        """
+        self.aspect_filter = aspect_filter
+
+    def received_announce(self, destination_hash, announced_identity, app_data):
+        """
+        Callback method invoked when an announce matching the filter is received.
+        
+        Args:
+            destination_hash (bytes): Hash of the announcing destination.
+            announced_identity (RNS.Identity): Identity of the announcing destination.
+            app_data (bytes): Application-specific data included in the announce.
+        """
+        dest_hash_str = RNS.prettyhexrep(destination_hash)
+        display_name = dest_hash_str
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+        if app_data:
+            try:
+                app_data_json = json.loads(app_data.decode("utf-8"))
+                # Extract server_name or client_name
+                if "server_name" in app_data_json:
+                    display_name = app_data_json["server_name"]
+                elif "client_name" in app_data_json:
+                    display_name = app_data_json["client_name"]
+            except json.JSONDecodeError:
+                # If app_data is not valid JSON, keep the default display_name
+                pass
+        
+        announce_message = {
+            "display_name": display_name,
+            "dest_hash": dest_hash_str,
+            "timestamp": timestamp
+        }
+        
+        announcement_queue.put(announce_message)
+        
+        # OPTIONAL: Log the announce
+        #RNS.log(f"[ANNOUNCE HANDLER] Received announce: {announce_message}")
+
+def register_announce_handler():
+    """
+    Registers the announce handler with Reticulum's transport.
+    """
+    aspect_filter = "retibbs.bbs"
+
+    announce_handler = AnnounceHandler(aspect_filter=aspect_filter)
+    
+    RNS.Transport.register_announce_handler(announce_handler)
+    
+    RNS.log("[CLIENT] Announce handler registered.")
 
 def client_setup(server_hexhash, configpath, identity_file):
     """
@@ -94,6 +155,8 @@ def client_setup(server_hexhash, configpath, identity_file):
     link.set_resource_started_callback(resource_started_callback)
     link.set_resource_concluded_callback(resource_concluded_callback)
 
+    register_announce_handler()
+
     RNS.log("[CLIENT] Establishing link with server...")
 
     wait_for_link(link)
@@ -111,7 +174,6 @@ def wait_for_link(link):
         RNS.log("[CLIENT] Link is ACTIVE. Now identifying to server...")
         link.identify(client_identity)
 
-        # Instead of a blocking loop, we now start the TUI.
         start_urwid_ui(link)
     else:
         RNS.log("[CLIENT] Link could not be established (status=CLOSED).")
@@ -193,59 +255,75 @@ class BBSClientUI:
         self.link = link
         self.receiving_data = False
         self.current_board = "None"
-
-        # Initialize message walker and listbox
+        self.announcements = {}
+        self.modal = None
+        
         self.message_walker = urwid.SimpleListWalker([])
         self.message_listbox = urwid.ListBox(self.message_walker)
         self.message_listbox_box = urwid.LineBox(
             self.message_listbox,
-            # Optional: Add a title or other decorations
+            title="Messages",
+            title_align='left'
         )
 
-        # Define the command prompt text
+        self.announcement_walker = urwid.SimpleListWalker([])
+        self.announcement_listbox = urwid.ListBox(self.announcement_walker)
+        self.announcement_listbox_box = urwid.LineBox(
+            self.announcement_listbox,
+            title="Announces",
+            title_align='left'
+        )
+
         self.prompt_text = f"Command [Board: {self.current_board}]"
         self.command_title = urwid.Text(self.prompt_text)
 
-        # Define the input prompt and edit box
         self.input_prompt = urwid.Text("> ")
         self.input_edit = urwid.Edit()
 
-        # Combine the input prompt and edit box into columns
         self.input_edit_box = urwid.Columns([
             ('fixed', len("> "), self.input_prompt),
             ('weight', 1, self.input_edit)
         ], dividechars=1, min_width=1)
 
-        # Create a Pile to stack the command prompt and input field vertically
         self.input_pile = urwid.Pile([
             self.command_title,
             self.input_edit_box
         ])
 
-        # Create a LineBox for the footer containing the input pile
         self.footer = urwid.LineBox(
             self.input_pile,
             title=None 
         )
 
-        # Assemble the frame with header, body, and footer
+        self.body = urwid.Columns([
+            ('weight', 3, self.message_listbox_box),
+            ('weight', 1, self.announcement_listbox_box)
+        ], dividechars=1, min_width=40)
+
         self.frame = urwid.Frame(
             header=urwid.Text("- RetiBBS -", align='center'),
-            body=self.message_listbox_box,
+            body=urwid.Pile([
+                self.body
+            ]),
             footer=self.footer
         )
 
-        # Initialize the MainLoop
         self.loop = urwid.MainLoop(
             self.frame,
-            palette=[('reversed', 'standout', '')],
+            palette=[
+                ('reversed', 'standout', ''),
+                ('announcement', 'dark cyan', ''),
+                ('error', 'dark red', ''),
+                ('button normal', 'light gray', ''),
+                ('button select', 'white', 'dark blue'),
+                ('modal', 'white', 'dark gray'),
+                # Add more styles as needed
+            ],
             unhandled_input=self.handle_input
         )
 
-        # Set up periodic polling of the message queue
-        self.loop.set_alarm_in(0.1, self.poll_message_queue)
+        self.loop.set_alarm_in(0.1, self.poll_queues)
 
-        # Display initial usage instructions
         self.show_usage_instructions()
 
     def set_receiving_data(self, is_receiving):
@@ -276,6 +354,11 @@ class BBSClientUI:
         if self.receiving_data:
             return
 
+        if self.modal:
+            if key in ("esc", "ctrl c"):
+                self.close_modal()
+            return
+
         if key in ("enter", "shift enter"):
             user_command = self.input_edit.edit_text.strip()
             self.input_edit.set_edit_text("")
@@ -287,6 +370,13 @@ class BBSClientUI:
                 self.add_line("[CLIENT] Exiting.")
                 self.tear_down()
                 return
+            elif cmd_lower.startswith("announce "):
+                announce_message = cmd_lower.replace("announce ", "", 1)
+                self.send_announce(self.link.destination, announce_message)
+                return
+            elif cmd_lower.startswith("help"):
+                self.show_help()
+                return
 
             data = user_command.encode("utf-8")
             if len(data) <= RNS.Link.MDU:
@@ -297,15 +387,99 @@ class BBSClientUI:
         elif key in ("ctrl c",):
             self.tear_down()
 
-    def poll_message_queue(self, loop, user_data):
+    def poll_queues(self, loop, user_data):
         while not message_queue.empty():
             msg = message_queue.get_nowait()
             self.add_line(msg)
-        loop.set_alarm_in(0.1, self.poll_message_queue)
+        while not announcement_queue.empty():
+            ann = announcement_queue.get_nowait()
+            self.add_announcement(ann)
+        loop.set_alarm_in(0.1, self.poll_queues)
 
     def add_line(self, text):
         self.message_walker.append(urwid.Text(text))
         self.message_listbox.focus_position = len(self.message_walker) - 1
+
+    def add_announcement(self, announce):
+        """
+        Adds an announcement to the Announcements pane as a clickable button.
+        If an announce from the same dest_hash exists, update it instead.
+
+        Args:
+            announce (dict): Dictionary containing 'display_name', 'dest_hash', and 'timestamp'.
+        """
+        display_name = announce.get("display_name", "Unknown")
+        dest_hash = announce.get("dest_hash", "Unknown")
+        timestamp = announce.get("timestamp", "")
+
+        if dest_hash in self.announcements:
+            existing_ann = self.announcements[dest_hash]
+            existing_ann['display_name'] = display_name
+            existing_ann['timestamp'] = timestamp
+
+            existing_ann['button'].original_widget.set_label(display_name)
+
+            self.announcement_walker.remove(existing_ann['button'])
+            self.announcement_walker.insert(0, existing_ann['button'])
+            self.announcement_listbox.focus_position = 0
+
+        else:
+            button = urwid.Button(display_name)
+            urwid.connect_signal(button, 'click', self.show_announce_modal, user_args=(display_name, dest_hash))
+            button = urwid.AttrMap(button, 'button normal', focus_map='button select')
+
+            self.announcement_walker.append(button)
+            self.announcement_listbox.focus_position = len(self.announcement_walker) - 1
+
+            self.announcements[dest_hash] = {
+                'display_name': display_name,
+                'dest_hash': dest_hash,
+                'timestamp': timestamp,
+                'button': button
+            }
+
+    def show_announce_modal(self, display_name, dest_hash, button):
+        """
+        Displays a modal with the announcement details.
+
+        Args:
+            button (urwid.Button): The button that was clicked.
+            display_name (str): The display name extracted from the announce.
+            dest_hash (str): The destination hash of the announcer.
+        """
+        timestamp = self.announcements.get(dest_hash, {}).get("timestamp", "Unknown")
+
+        modal_content = [
+            urwid.Text(f"Name: {display_name}", align='center'),
+            urwid.Text(f"Destination Hash: {dest_hash}", align='center'),
+            urwid.Text(f"Last Announce: {timestamp}", align='center'),
+            urwid.Divider(),
+            urwid.Button("Close", on_press=self.close_modal)
+        ]
+
+        pile = urwid.Pile(modal_content)
+        fill = urwid.Filler(pile, valign='middle')
+        box = urwid.LineBox(fill, title="Announce Details", title_align='center')
+        overlay = urwid.Overlay(
+            box,
+            self.frame,
+            align='center',
+            width=('relative', 50),
+            valign='middle',
+            height=('relative', 40),
+            min_width=20,
+            min_height=9
+        )
+
+        self.modal = overlay
+        self.loop.widget = self.modal
+
+    def close_modal(self, button=None):
+        """
+        Closes the currently open modal.
+        """
+        self.modal = None
+        self.loop.widget = self.frame
 
     def show_usage_instructions(self):
         """
@@ -314,6 +488,36 @@ class BBSClientUI:
         self.add_line("Client Ready!")
         self.add_line("  ? | help to show command help")
         self.add_line("  quit with 'q', 'quit', 'e', or 'exit'")
+        self.add_line("  announce <message> to send an announce")
+
+    def show_help(self):
+        """
+        Display help information.
+        """
+        help_text = (
+            "Client Ready!\n"
+            "  ?  | help  - to show command help\n"
+            "  quit with 'q', 'quit', 'e', or 'exit'\n"
+            "  announce <message> to send an announce\n"
+        )
+        self.add_line(help_text)
+
+    def send_announce(self, destination, app_data_str):
+        """
+        Sends an announce with the specified app data.
+        
+        Args:
+            destination (RNS.Destination): The destination to announce.
+            app_data_str (str): The application-specific data to include.
+        """
+        try:
+            announce_data = json.dumps({"client_name": app_data_str}).encode("utf-8")
+            destination.announce(app_data=announce_data)
+            self.add_line(f"[CLIENT] Sent announce: {app_data_str}")
+            RNS.log(f"[CLIENT] Sent announce: {app_data_str}")
+        except Exception as e:
+            self.add_line(f"[ERROR] Failed to send announce: {e}")
+            RNS.log(f"[CLIENT] Error sending announce: {e}", RNS.LOG_ERROR)
 
     def tear_down(self):
         if self.link is not None:
