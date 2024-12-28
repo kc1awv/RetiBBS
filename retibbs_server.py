@@ -340,7 +340,7 @@ def server_packet_received(message_bytes, packet):
         
         if not is_valid_board_name(board_name):
             send_link_reply(packet.link, "ERROR: Invalid board name. Must be alphanumeric and 3-20 characters long.\n")
-        return
+            return
 
         boards_mgr.create_board(board_name)
         send_link_reply(packet.link, f"Board '{board_name}' is ready.\n")
