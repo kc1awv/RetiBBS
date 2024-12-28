@@ -355,7 +355,6 @@ def handle_join_board(packet, user_hash_hex, board_name):
     if current == board_name:
         reply = f"You are already in board '{board_name}'\n"
     else:
-        #boards_mgr.create_board(board_name)
         user_info["current_board"] = board_name
         reply = f"You have joined board '{board_name}'\n"
 
@@ -434,7 +433,6 @@ if __name__ == "__main__":
 
         auth_file_path = args.auth_file
 
-        # Load server configuration
         if os.path.isfile(args.config_file):
             try:
                 with open(args.config_file, "r", encoding="utf-8") as f:
