@@ -184,7 +184,8 @@ def remote_identified(link, identity):
     if identity_hash_hex not in authorized_users:
         authorized_users[identity_hash_hex] = {
             "name": None,
-            "current_board": None
+            "current_board": None,
+            "is_admin": False
         }
         RNS.log(f"[Server] Added new user {display_str} to authorized list.")
         if auth_file_path:
