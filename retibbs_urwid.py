@@ -66,8 +66,8 @@ class AnnounceHandler:
             app_data (bytes): Application-specific data included in the announce.
         """
         dest_hash_str = RNS.prettyhexrep(destination_hash)
-
         display_name = dest_hash_str
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
         if app_data:
             try:
@@ -83,7 +83,8 @@ class AnnounceHandler:
         
         announce_message = {
             "display_name": display_name,
-            "dest_hash": dest_hash_str
+            "dest_hash": dest_hash_str,
+            "timestamp": timestamp
         }
         
         announcement_queue.put(announce_message)
@@ -254,6 +255,7 @@ class BBSClientUI:
         self.link = link
         self.receiving_data = False
         self.current_board = "None"
+        self.announcements = {}
         self.modal = None
         
         self.message_walker = urwid.SimpleListWalker([])
@@ -401,33 +403,56 @@ class BBSClientUI:
     def add_announcement(self, announce):
         """
         Adds an announcement to the Announcements pane as a clickable button.
-        
+        If an announce from the same dest_hash exists, update it instead.
+
         Args:
-            announce (dict): Dictionary containing 'display_name' and 'dest_hash'.
+            announce (dict): Dictionary containing 'display_name', 'dest_hash', and 'timestamp'.
         """
         display_name = announce.get("display_name", "Unknown")
         dest_hash = announce.get("dest_hash", "Unknown")
+        timestamp = announce.get("timestamp", "")
 
-        button = urwid.Button(display_name)
-        urwid.connect_signal(button, 'click', self.show_announce_modal, user_args=(display_name, dest_hash))
+        if dest_hash in self.announcements:
+            existing_ann = self.announcements[dest_hash]
+            existing_ann['display_name'] = display_name
+            existing_ann['timestamp'] = timestamp
 
-        button = urwid.AttrMap(button, 'button normal', focus_map='button select')
+            existing_ann['button'].original_widget.set_label(display_name)
 
-        self.announcement_walker.append(button)
-        self.announcement_listbox.focus_position = len(self.announcement_walker) - 1
+            self.announcement_walker.remove(existing_ann['button'])
+            self.announcement_walker.insert(0, existing_ann['button'])
+            self.announcement_listbox.focus_position = 0
+
+        else:
+            button = urwid.Button(display_name)
+            urwid.connect_signal(button, 'click', self.show_announce_modal, user_args=(display_name, dest_hash))
+            button = urwid.AttrMap(button, 'button normal', focus_map='button select')
+
+            self.announcement_walker.append(button)
+            self.announcement_listbox.focus_position = len(self.announcement_walker) - 1
+
+            self.announcements[dest_hash] = {
+                'display_name': display_name,
+                'dest_hash': dest_hash,
+                'timestamp': timestamp,
+                'button': button
+            }
 
     def show_announce_modal(self, display_name, dest_hash, button):
         """
         Displays a modal with the announcement details.
-        
+
         Args:
             button (urwid.Button): The button that was clicked.
-            user_data (tuple): Tuple containing (display_name, dest_hash).
+            display_name (str): The display name extracted from the announce.
+            dest_hash (str): The destination hash of the announcer.
         """
+        timestamp = self.announcements.get(dest_hash, {}).get("timestamp", "Unknown")
 
         modal_content = [
             urwid.Text(f"Name: {display_name}", align='center'),
             urwid.Text(f"Destination Hash: {dest_hash}", align='center'),
+            urwid.Text(f"Last Announce: {timestamp}", align='center'),
             urwid.Divider(),
             urwid.Button("Close", on_press=self.close_modal)
         ]

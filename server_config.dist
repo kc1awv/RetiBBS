@@ -1,3 +1,4 @@
 {
-    "server_name": "Mu RetiBBS Server"
+    "server_name": "Mu RetiBBS Server",
+    "announce_interval": 300
 }
