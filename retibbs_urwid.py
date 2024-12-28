@@ -416,7 +416,7 @@ class BBSClientUI:
         self.announcement_walker.append(button)
         self.announcement_listbox.focus_position = len(self.announcement_walker) - 1
 
-    def show_announce_modal(self, button, display_name, dest_hash):
+    def show_announce_modal(self, display_name, dest_hash, button):
         """
         Displays a modal with the announcement details.
         
@@ -434,7 +434,7 @@ class BBSClientUI:
 
         pile = urwid.Pile(modal_content)
         fill = urwid.Filler(pile, valign='middle')
-        box = urwid.LineBox(fill, title="Announcement Details", title_align='center')
+        box = urwid.LineBox(fill, title="Announce Details", title_align='center')
         overlay = urwid.Overlay(
             box,
             self.frame,
