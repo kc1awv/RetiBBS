@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import queue
 import re
 import sys
+import threading
 import time
 import urwid
-import json
 
 import RNS
 
 APP_NAME = "retibbs"
 SERVICE_NAME = "bbs"
 
+reticulum_instance = None
 server_link = None
 client_identity = None
 ui_ref = None
 
+log_queue = queue.Queue()
 message_queue = queue.Queue()
 announcement_queue = queue.Queue()
 
@@ -24,16 +27,14 @@ _old_log = RNS.log
 
 def urwid_log_hook(message, level=RNS.LOG_INFO, end="\n"):
     """
-    Override RNS.log so all logs go into our TUI message queue.
-    You can skip this if you only want to display server messages, not logs.
+    Override RNS.log so all logs go into the log_queue for the logs tab.
     """
-    message_queue.put(f"[LOG] {message}")
+    severity = {RNS.LOG_INFO: "INFO", RNS.LOG_WARNING: "WARNING", RNS.LOG_ERROR: "ERROR"}.get(level, "INFO")
+    log_queue.put(f"[{severity}] {message}")
     # If you also want them in original stdout logs, call the old logger:
     # _old_log(message, level=level)
 
-# Uncomment if you want to redirect *all* logs into the TUI:
-# RNS.log = urwid_log_hook
-
+RNS.log = urwid_log_hook
 
 def load_or_create_identity(identity_path):
     if os.path.isfile(identity_path):
@@ -65,29 +66,31 @@ class AnnounceHandler:
             announced_identity (RNS.Identity): Identity of the announcing destination.
             app_data (bytes): Application-specific data included in the announce.
         """
-        dest_hash_str = RNS.prettyhexrep(destination_hash)
-        display_name = dest_hash_str
+        dest_hash_raw = destination_hash.hex()
+        dest_hash_display = RNS.prettyhexrep(destination_hash)
+        display_name = dest_hash_display
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
         if app_data:
             try:
                 app_data_json = json.loads(app_data.decode("utf-8"))
-                # Extract server_name or client_name
                 if "server_name" in app_data_json:
                     display_name = app_data_json["server_name"]
                 elif "client_name" in app_data_json:
                     display_name = app_data_json["client_name"]
             except json.JSONDecodeError:
-                # If app_data is not valid JSON, keep the default display_name
                 pass
         
         announce_message = {
             "display_name": display_name,
-            "dest_hash": dest_hash_str,
+            "dest_hash": dest_hash_raw,
             "timestamp": timestamp
         }
         
         announcement_queue.put(announce_message)
+
+        if ui_ref is not None:
+            ui_ref.add_announcement(announce_message)
         
         # OPTIONAL: Log the announce
         #RNS.log(f"[ANNOUNCE HANDLER] Received announce: {announce_message}")
@@ -97,69 +100,126 @@ def register_announce_handler():
     Registers the announce handler with Reticulum's transport.
     """
     aspect_filter = "retibbs.bbs"
-
     announce_handler = AnnounceHandler(aspect_filter=aspect_filter)
-    
     RNS.Transport.register_announce_handler(announce_handler)
-    
     RNS.log("[CLIENT] Announce handler registered.")
+
+def initialize_reticulum(configpath, identity_file):
+    """
+    Initializes Reticulum and loads or creates the client identity.
+    
+    Args:
+        configpath (str): Path to Reticulum configuration directory.
+        identity_file (str): Path to the client identity file.
+    
+    Returns:
+        RNS.Reticulum: The initialized Reticulum instance.
+    """
+    global reticulum_instance, client_identity
+
+    if reticulum_instance is not None:
+        RNS.log("[CLIENT] Reticulum is already initialized.")
+        return reticulum_instance
+
+    reticulum_instance = RNS.Reticulum(configpath)
+    client_identity = load_or_create_identity(identity_file)
+    RNS.log(f"[CLIENT] Using Identity: {client_identity}")
+    
+    return reticulum_instance
 
 def client_setup(server_hexhash, configpath, identity_file):
     """
     Initializes Reticulum, sets up the client Identity,
-    forms a Link to the server, and starts the urwid UI.
+    forms a Link to the server if server_hexhash is provided,
+    and starts the urwid UI.
     """
-    global client_identity
+    initialize_reticulum(configpath, identity_file)
 
-    reticulum = RNS.Reticulum(configpath)
+    global ui_ref
+    ui = BBSClientUI()
+    ui_ref = ui
+    ui.set_current_board(board_name="No Link")
 
-    client_identity = load_or_create_identity(identity_file)
-    RNS.log("[CLIENT] Using Identity: " + str(client_identity))
+    if server_hexhash:
+        connection_thread = threading.Thread(target=connect_client, args=(server_hexhash,), daemon=True)
+        connection_thread.start()
+    else:
+        register_announce_handler()
+    
+    ui.run()
 
+def connect_client(server_hexhash):
+    """
+    Connects to a specified server using its hexhash.
+    
+    Args:
+        server_hexhash (str): The hexhash of the server to connect to.
+    """
     try:
         server_addr = bytes.fromhex(server_hexhash)
     except ValueError:
-        RNS.log("[CLIENT] Invalid server hexhash!")
-        sys.exit(1)
+        RNS.log(f"[CLIENT] Invalid server hexhash! {server_hexhash}")
+        message_queue.put("[CONNECT] Failed: Invalid server hexhash.")
+        return
 
-    if not RNS.Transport.has_path(server_addr):
-        RNS.log("[CLIENT] Path to server unknown, requesting path and waiting for announce...")
-        RNS.Transport.request_path(server_addr)
-        timeout_t0 = time.time()
-        while not RNS.Transport.has_path(server_addr):
-            if time.time() - timeout_t0 > 15:
-                RNS.log("[CLIENT] Timed out waiting for path!")
-                sys.exit(1)
-            time.sleep(0.1)
+    try:
+        if not RNS.Transport.has_path(server_addr):
+            RNS.log("[CLIENT] Path to server unknown, requesting path and waiting for announce...")
+            RNS.Transport.request_path(server_addr)
+            timeout_t0 = time.time()
+            while not RNS.Transport.has_path(server_addr):
+                if time.time() - timeout_t0 > 15:
+                    RNS.log("[CLIENT] Timed out waiting for path!")
+                    message_queue.put("[CONNECT] Failed: Timed out waiting for path.")
+                    return
+                time.sleep(0.1)
 
-    server_identity = RNS.Identity.recall(server_addr)
-    if not server_identity:
-        RNS.log("[CLIENT] Could not recall server Identity!")
-        sys.exit(1)
+        server_identity = RNS.Identity.recall(server_addr)
+        if not server_identity:
+            RNS.log("[CLIENT] Could not recall server Identity!")
+            message_queue.put("[CONNECT] Failed: Could not recall server Identity.")
+            return
 
-    server_destination = RNS.Destination(
-        server_identity,
-        RNS.Destination.OUT,
-        RNS.Destination.SINGLE,
-        APP_NAME,
-        SERVICE_NAME
-    )
+        server_destination = RNS.Destination(
+            server_identity,
+            RNS.Destination.OUT,
+            RNS.Destination.SINGLE,
+            APP_NAME,
+            SERVICE_NAME
+        )
 
-    link = RNS.Link(server_destination)
-    link.set_link_established_callback(link_established)
-    link.set_link_closed_callback(link_closed)
-    link.set_packet_callback(client_packet_received)
+        link = RNS.Link(server_destination)
+        link.set_link_established_callback(link_established)
+        link.set_link_closed_callback(link_closed)
+        link.set_packet_callback(client_packet_received)
 
-    # IMPORTANT: Accept resources from the server
-    link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
-    link.set_resource_started_callback(resource_started_callback)
-    link.set_resource_concluded_callback(resource_concluded_callback)
+        # IMPORTANT: Accept resources from the server
+        link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
+        link.set_resource_started_callback(resource_started_callback)
+        link.set_resource_concluded_callback(resource_concluded_callback)
 
-    register_announce_handler()
+        register_announce_handler()
 
-    RNS.log("[CLIENT] Establishing link with server...")
+        RNS.log("[CLIENT] Establishing link with server...")
+        message_queue.put("[CONNECT] Establishing link with server...")
 
-    wait_for_link(link)
+        wait_for_link(link)
+
+        if link.status == RNS.Link.ACTIVE:
+            RNS.log("[CLIENT] Link is ACTIVE. Now identifying to server...")
+            message_queue.put("[CONNECT] Link is ACTIVE. Now identifying to server...")
+            link.identify(client_identity)
+            RNS.log("[CLIENT] Successfully connected to the server.")
+            message_queue.put("[CONNECT] success")
+            message_queue.put(("SET_LINK", link))
+        else:
+            RNS.log("[CLIENT] Link could not be established (status=CLOSED).")
+            message_queue.put("[CONNECT] Failed: Link could not be established.")
+            sys.exit(1)
+
+    except Exception as e:
+        RNS.log(f"[CLIENT] Error connecting to server: {e}", RNS.LOG_ERROR)
+        message_queue.put("[CONNECT] Failed: Error connecting to server.")
 
 def wait_for_link(link):
     t0 = time.time()
@@ -169,15 +229,6 @@ def wait_for_link(link):
             link.teardown()
             sys.exit(1)
         time.sleep(0.1)
-
-    if link.status == RNS.Link.ACTIVE:
-        RNS.log("[CLIENT] Link is ACTIVE. Now identifying to server...")
-        link.identify(client_identity)
-
-        start_urwid_ui(link)
-    else:
-        RNS.log("[CLIENT] Link could not be established (status=CLOSED).")
-        sys.exit(1)
 
 def client_packet_received(message_bytes, packet):
     """
@@ -201,7 +252,6 @@ def resource_started_callback(resource):
     Optional: Called when the server begins sending a resource.
     You could display a 'downloading...' message or track progress.
     """
-    #pass
     global ui_ref
     if ui_ref is not None:
         ui_ref.set_receiving_data(True)
@@ -234,8 +284,10 @@ def link_established(link):
     global server_link
     server_link = link
 
-def link_closed(link):
-    RNS.log("\n[CLIENT] Link was closed or lost. Exiting.")
+def link_closed(self, link):
+    RNS.log("\n\n[CLIENT] Link was closed or lost. Exiting.")
+    self.link = None
+    self.set_current_board()
     RNS.Reticulum.exit_handler()
     time.sleep(1)
     sys.exit(0)
@@ -250,13 +302,64 @@ def start_urwid_ui(link):
     ui_ref = ui
     ui.run()
 
+class TabBar(urwid.WidgetWrap):
+    def __init__(self, tabs, on_tab_change):
+        self.tabs = tabs
+        self.on_tab_change = on_tab_change
+        self.current_tab = 0
+
+        tab_buttons = []
+        for idx, tab in enumerate(tabs):
+            button = urwid.Button(tab)
+            urwid.connect_signal(button, 'click', self.tab_clicked, user_args=[idx])
+            if idx == self.current_tab:
+                button = urwid.AttrMap(button, 'button select', 'reversed')
+            else:
+                button = urwid.AttrMap(button, 'button normal', 'button select')
+            tab_buttons.append(button)
+        
+        self.tabs_box = urwid.Columns(tab_buttons)
+        self.widget = self.tabs_box
+        super().__init__(self.widget)
+
+    def tab_clicked(self, idx, button):
+        self.current_tab = idx
+        self.update_tabs()
+        self.on_tab_change(idx)
+
+    def update_tabs(self):
+        new_buttons = []
+        for idx, tab in enumerate(self.tabs):
+            button = urwid.Button(tab)
+            urwid.connect_signal(button, 'click', self.tab_clicked, user_args=[idx])
+            if idx == self.current_tab:
+                button = urwid.AttrMap(button, 'button select', 'reversed')
+            else:
+                button = urwid.AttrMap(button, 'button normal', 'button select')
+            new_buttons.append(button)
+        self.tabs_box.contents = [(new_buttons[i], self.tabs_box.options()) for i in range(len(new_buttons))]
+        self.tabs_box = urwid.Columns(new_buttons)
+        self.widget = self.tabs_box
+        self._invalidate()
+
 class BBSClientUI:
-    def __init__(self, link):
+    def __init__(self, link=None):
         self.link = link
         self.receiving_data = False
         self.current_board = "None"
         self.announcements = {}
         self.modal = None
+        self.active_tab = 'Main'
+        
+        self.title = urwid.Text(" - RetiBBS Client - ", align='center')
+
+        self.tabs = ['Main', 'Logs']
+        self.tab_bar = TabBar(self.tabs, self.on_tab_change)
+
+        self.header = urwid.Pile([
+            self.title,
+            self.tab_bar
+        ])
         
         self.message_walker = urwid.SimpleListWalker([])
         self.message_listbox = urwid.ListBox(self.message_walker)
@@ -274,14 +377,22 @@ class BBSClientUI:
             title_align='left'
         )
 
+        self.log_walker = urwid.SimpleListWalker([])  # Walker for logs
+        self.log_listbox = urwid.ListBox(self.log_walker)
+        self.log_listbox_box = urwid.LineBox(
+            self.log_listbox,
+            title="Logs",
+            title_align='left'
+        )
+
         self.prompt_text = f"Command [Board: {self.current_board}]"
         self.command_title = urwid.Text(self.prompt_text)
 
-        self.input_prompt = urwid.Text("> ")
+        self.input_prompt = urwid.Text(">")
         self.input_edit = urwid.Edit()
 
         self.input_edit_box = urwid.Columns([
-            ('fixed', len("> "), self.input_prompt),
+            ('fixed', len(">"), self.input_prompt),
             ('weight', 1, self.input_edit)
         ], dividechars=1, min_width=1)
 
@@ -295,16 +406,18 @@ class BBSClientUI:
             title=None 
         )
 
-        self.body = urwid.Columns([
+        self.main_body = urwid.Columns([
             ('weight', 3, self.message_listbox_box),
             ('weight', 1, self.announcement_listbox_box)
         ], dividechars=1, min_width=40)
 
+        self.logs_body = self.log_listbox_box
+
+        self.body = self.main_body
+
         self.frame = urwid.Frame(
-            header=urwid.Text("- RetiBBS -", align='center'),
-            body=urwid.Pile([
-                self.body
-            ]),
+            header=self.header,
+            body=self.body,
             footer=self.footer
         )
 
@@ -325,6 +438,27 @@ class BBSClientUI:
         self.loop.set_alarm_in(0.1, self.poll_queues)
 
         self.show_usage_instructions()
+    
+    def on_tab_change(self, idx):
+        """
+        Callback when a tab is changed.
+        """
+        selected_tab = self.tabs[idx]
+        self.active_tab = selected_tab
+        if selected_tab == 'Main':
+            self.frame.body = self.main_body
+            self.frame.footer = self.footer
+        elif selected_tab == 'Logs':
+            self.frame.body = self.logs_body
+            self.frame.footer = None
+    
+    def set_link(self, link):
+        """
+        Sets the link after it's established.
+        """
+        self.link = link
+        self.add_line("[CLIENT] Link established and set in UI.")
+        self.set_current_board()
 
     def set_receiving_data(self, is_receiving):
         """
@@ -339,12 +473,15 @@ class BBSClientUI:
             self.input_edit.set_edit_text("")
             self.input_edit.set_edit_pos(0)
 
-    def set_current_board(self, board_name):
+    def set_current_board(self, board_name=None):
         """
         Update the current board and modify the command title.
         """
-        self.current_board = board_name
-        self.prompt_text = f"Command [Board: {self.current_board}]"
+        if self.link:
+            self.current_board = board_name if board_name else "None"
+            self.prompt_text = f"Command [Board: {self.current_board}]"
+        else:
+            self.prompt_text = "Command [No Link]"
         self.command_title.set_text(self.prompt_text)
 
     def run(self):
@@ -370,27 +507,58 @@ class BBSClientUI:
                 self.add_line("[CLIENT] Exiting.")
                 self.tear_down()
                 return
-            elif cmd_lower.startswith("announce "):
-                announce_message = cmd_lower.replace("announce ", "", 1)
-                self.send_announce(self.link.destination, announce_message)
-                return
-            elif cmd_lower.startswith("help"):
-                self.show_help()
+
+            if cmd_lower in ["?", "help"]:
+                if self.link:
+                    data = user_command.encode("utf-8")
+                    if len(data) <= RNS.Link.MDU:
+                        RNS.Packet(self.link, data).send()
+                        self.add_line(f"> {user_command}")
+                    else:
+                        self.add_line(f"[ERROR] Data size {len(data)} exceeds MDU!")
+                else:
+                    self.show_usage_instructions()
                 return
 
-            data = user_command.encode("utf-8")
-            if len(data) <= RNS.Link.MDU:
-                RNS.Packet(self.link, data).send()
-                self.add_line(f"> {user_command}")
+            if self.link:
+                data = user_command.encode("utf-8")
+                if len(data) <= RNS.Link.MDU:
+                    RNS.Packet(self.link, data).send()
+                    self.add_line(f"> {user_command}")
+                else:
+                    self.add_line(f"[ERROR] Data size {len(data)} exceeds MDU!")
             else:
-                self.add_line(f"[ERROR] Data size {len(data)} exceeds MDU!")
+                self.add_line("[CLIENT] No link established. Cannot send command.")
         elif key in ("ctrl c",):
             self.tear_down()
 
     def poll_queues(self, loop, user_data):
         while not message_queue.empty():
             msg = message_queue.get_nowait()
-            self.add_line(msg)
+            if isinstance(msg, tuple) and msg[0] == "SET_LINK":
+                link = msg[1]
+                self.set_link(link)
+                self.set_current_board()
+            elif msg.startswith("[LOG]"):
+                self.log_walker.append(urwid.Text(msg))
+                self.log_listbox.focus_position = len(self.log_walker) - 1
+            elif msg.startswith("[CONNECT]"):
+                if "success" in msg.lower():
+                    self.add_line("[CLIENT] Successfully connected to the server.")
+                    self.set_current_board()
+                elif "failed" in msg.lower():
+                    self.add_line("[CLIENT] Failed to connect to the server.")
+                    self.set_current_board()
+                else:
+                    self.add_line(msg)
+                    self.set_current_board()
+                self.close_modal()
+            else:
+                self.add_line(msg)
+        while not log_queue.empty():
+            log_msg = log_queue.get_nowait()
+            self.log_walker.append(urwid.Text(log_msg))
+            self.log_listbox.focus_position = len(self.log_walker) - 1
         while not announcement_queue.empty():
             ann = announcement_queue.get_nowait()
             self.add_announcement(ann)
@@ -457,6 +625,10 @@ class BBSClientUI:
             urwid.Button("Close", on_press=self.close_modal)
         ]
 
+        connect_button = urwid.Button("Connect to Server")
+        urwid.connect_signal(connect_button, 'click', self.connect_to_selected_server, user_args=(dest_hash,))
+        modal_content.append(connect_button)
+
         pile = urwid.Pile(modal_content)
         fill = urwid.Filler(pile, valign='middle')
         box = urwid.LineBox(fill, title="Announce Details", title_align='center')
@@ -473,6 +645,23 @@ class BBSClientUI:
 
         self.modal = overlay
         self.loop.widget = self.modal
+    
+    def connect_to_selected_server(self, dest_hash, button):
+        """
+        Handle connecting to the server when the "Connect to Server" button is pressed.
+
+        Args:
+            button (urwid.Button): The button that was clicked.
+            dest_hash (str): The destination hash of the server to connect to.
+        """
+        RNS.log(f"[CLIENT] Initiating connection to server with hash: {dest_hash}...")
+        message_queue.put("[CLIENT] Initiating connection to server...")
+
+        connection_thread = threading.Thread(target=connect_client, args=(dest_hash,))
+        connection_thread.daemon = True
+        connection_thread.start()
+
+        self.close_modal(button)
 
     def close_modal(self, button=None):
         """
@@ -485,22 +674,12 @@ class BBSClientUI:
         """
         Print usage instructions for the user.
         """
-        self.add_line("Client Ready!")
-        self.add_line("  ? | help to show command help")
-        self.add_line("  quit with 'q', 'quit', 'e', or 'exit'")
-        self.add_line("  announce <message> to send an announce")
-
-    def show_help(self):
-        """
-        Display help information.
-        """
-        help_text = (
+        usage_text = (
             "Client Ready!\n"
-            "  ?  | help  - to show command help\n"
+            "  ? | help to show command help\n"
             "  quit with 'q', 'quit', 'e', or 'exit'\n"
-            "  announce <message> to send an announce\n"
         )
-        self.add_line(help_text)
+        self.add_line(usage_text)
 
     def send_announce(self, destination, app_data_str):
         """
@@ -541,7 +720,6 @@ if __name__ == "__main__":
             "--server",
             action="store",
             default=None,
-            required=True,
             help="Server hexhash to connect (e.g. e7a1f4d35b2a...)",
             type=str
         )
@@ -554,7 +732,10 @@ if __name__ == "__main__":
         )
 
         args = parser.parse_args()
-        client_setup(args.server, args.config, args.identity_file)
+        if args.server:
+            client_setup(args.server, args.config, args.identity_file)
+        else:
+            client_setup(None, args.config, args.identity_file)
 
     except KeyboardInterrupt:
         print("")
