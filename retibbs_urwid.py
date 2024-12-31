@@ -39,7 +39,7 @@ RNS.log = urwid_log_hook
 def load_or_create_identity(identity_path):
     if os.path.isfile(identity_path):
         identity = RNS.Identity.from_file(identity_path)
-        RNS.log(f"[CLIENT] Loaded Identity from {identity_path}")
+        RNS.log(f"[CLIENT] Loaded Identity {identity} from {identity_path}")
     else:
         identity = RNS.Identity()
         identity.to_file(identity_path)

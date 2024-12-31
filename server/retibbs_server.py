@@ -111,6 +111,7 @@ def server_setup(configpath, identity_file, auth_file, server_name, announce_int
     )
     server_destination.set_link_established_callback(client_connected)
 
+    RNS.log(f"[DEBUG] Server destination hash: {server_destination.hash.hex()}")
     RNS.log(f"[Server] BBS Server running. Identity hash: {RNS.prettyhexrep(server_destination.hash)}")
     RNS.log(f"[Server] Loaded {len(authorized_users)} authorized users.")
     RNS.log("[Server] Press Enter to send an ANNOUNCE. Ctrl-C to quit.")
@@ -155,14 +156,14 @@ def start_automatic_announce(server_destination):
 
 def client_connected(link):
     global latest_client_link
-    latest_client_link = link
-    server_destination = link.destination
 
     RNS.log("[Server] Client link established!")
-    RNS.log(f"[Server] Client destination: {RNS.prettyhexrep(server_destination.hash)}")
+    RNS.log(f"[Server] Client destination: {RNS.prettyhexrep(link.destination.hash)}")
+
     link.set_link_closed_callback(client_disconnected)
     link.set_packet_callback(server_packet_received)
     link.set_remote_identified_callback(remote_identified)
+    latest_client_link = link
 
     # FUTURE: automatically accept inbound resources from the client:
     # link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
@@ -181,6 +182,12 @@ def remote_identified(link, identity):
     display_str = RNS.prettyhexrep(identity.hash)
 
     RNS.log(f"[Server] Remote identified as {display_str}")
+    RNS.log(f"[Server] Client destination after identification: {RNS.prettyhexrep(link.destination.hash)}")
+
+    if link.destination.hash == RNS.Transport.identity.hash:
+        RNS.log("[ERROR] Identified client destination matches server destination. This is not allowed!", RNS.LOG_ERROR)
+        link.teardown()
+        return
 
     # For demonstration, automatically authorize them
     if identity_hash_hex not in authorized_users:
@@ -438,12 +445,23 @@ def handle_list_board(packet, board_name):
     send_resource_reply(packet.link, reply)
 
 def send_link_reply(link, text):
-    """
-    Sends a reply to the client as a Packet.
-    """
     data = text.encode("utf-8")
-    RNS.log(f"[Server] Sending packet reply to: {link.destination.hash.hex()}")
-    RNS.Packet(link, data).send()
+
+    if link.destination.hash == RNS.Transport.identity.hash:
+        RNS.log(f"[ERROR] Attempted to send packet to self. Destination hash: {RNS.prettyhexrep(link.destination.hash)}", RNS.LOG_ERROR)
+        return  # Abort sending the packet
+
+    RNS.log(f"[Server] Sending packet reply to: {RNS.prettyhexrep(link.destination.hash)}")
+    packet = RNS.Packet(link, data)
+    packet.send()
+
+def packet_delivered(receipt):
+    RNS.log(f"[Server] Packet delivered to {receipt.destination}")
+
+def packet_timeout(receipt):
+    RNS.log(f"[Server] Packet to {receipt.destination} timed out", RNS.LOG_ERROR)
+    link = receipt.destination
+    link.teardown()
 
 def send_resource_reply(link, text):
     """
@@ -453,7 +471,7 @@ def send_resource_reply(link, text):
     """
     data = text.encode("utf-8")
     resource = RNS.Resource(data, link)
-    RNS.log(f"[Server] Sending resource reply to: {link.destination.hash.hex()}")
+    RNS.log(f"[Server] Sending resource reply to: {RNS.prettyhexrep(link.destination.hash)}")
 
 auth_file_path = None
 

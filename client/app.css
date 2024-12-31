@@ -1,0 +1,50 @@
+Screen {
+    layout: vertical;
+}
+
+#main_body {
+    height: 1fr;
+    border: round cornflowerblue;
+    padding: 0;
+}
+
+#main_log {
+    height: 1fr;
+    border: none;
+    padding: 0 1;
+    background: black;
+    color: white;
+}
+
+.server-list {
+    height: 1fr;
+}
+
+.debug-log {
+    height: 7;
+    border: round gray;
+    padding: 0 1;
+    background: #1e1e1e;
+    color: #aaaaaa;
+    overflow: auto;
+}
+
+#left_panel {
+    width: 70%; /* Adjust as needed */
+}
+
+#right_panel {
+    width: 30%; /* Adjust as needed */
+}
+
+#command_input {
+    height: 3;
+    border: round lightgrey;
+}
+
+.log-message {
+    padding: 0;          /* Ensure no extra padding inside log messages */
+    margin: 0;           /* Remove any margin around log messages */
+    background: transparent;    /* No background unless explicitly needed */
+    color: white;        /* Text color */
+}
