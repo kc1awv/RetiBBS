@@ -104,7 +104,7 @@ Example:
 ```
 
 ## Development
-The codebase is organized into three main components:
+The codebase is organized into these main components:
 
 - Server (server): Handles client connections, message boards, and user management
 - Client (client): Provides the user interface and server connection handling
