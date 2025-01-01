@@ -3,6 +3,7 @@
 *.log
 *.db
 *.pem
+defunct/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
