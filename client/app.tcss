@@ -16,7 +16,15 @@ Screen {
     color: white;
 }
 
+.address_book {
+    height: 1fr;
+}
+
 .server-list {
+    height: 1fr;
+}
+
+.tabs {
     height: 1fr;
 }
 
@@ -47,4 +55,34 @@ Screen {
     margin: 0;           /* Remove any margin around log messages */
     background: transparent;    /* No background unless explicitly needed */
     color: white;        /* Text color */
+}
+
+ServerDetailScreen {
+    align: center middle;
+}
+
+#server_details_dialog {
+    grid-size: 3;
+    grid-gutter: 1 2;
+    grid-rows: 1fr 3;
+    padding: 0 1;
+    width: 99;
+    height: 11;
+    border: thick $background 80%;
+    background: $surface;
+}
+
+#server_details {
+    column-span: 3;
+    height: 1fr;
+    width: 1fr;
+    content-align: center top;
+    padding: 1;
+}
+
+.button {
+    width: 1fr;
+    height: 1fr;
+    padding: 0 1;
+    content-align: center middle;
 }
