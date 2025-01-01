@@ -1,5 +1,7 @@
 # RetiBBS
 
+![Screenshot](meta/client_demo.png)
+
 An ALPHA bulletin board system (BBS) implementation for Reticulum networks.
 
 RetiBBS allows users to communicate through message boards in a secure manner.
