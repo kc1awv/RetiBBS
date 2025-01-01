@@ -92,6 +92,17 @@ python retibbs_textual.py [OPTIONS]
 ### Client Address Book (address_book.json)
 Saved servers are stored in JSON format with server names and hashes.
 
+Example:
+```json
+{
+    "019e6ad5a0e47048413c9f7578e83393": {
+        "display_name": "Beleth Test",
+        "hash": "019e6ad5a0e47048413c9f7578e83393",
+        "timestamp": "2025-01-01 13:31:08"
+    }
+}
+```
+
 ## Development
 The codebase is organized into three main components:
 
