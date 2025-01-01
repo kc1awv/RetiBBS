@@ -57,6 +57,21 @@ Screen {
     color: white;        /* Text color */
 }
 
+HelpScreen {
+    align: center middle;
+}
+
+#help_dialog {
+    grid-size: 1;
+    grid-gutter: 1 2;
+    grid-rows: 1fr;
+    padding: 0 1;
+    width: 60;
+    height: 13;
+    border: thick $background 80%;
+    background: $surface;
+}
+
 ServerDetailScreen {
     align: center middle;
 }

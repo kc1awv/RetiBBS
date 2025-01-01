@@ -111,7 +111,6 @@ def server_setup(configpath, identity_file, auth_file, server_name, announce_int
     )
     server_destination.set_link_established_callback(client_connected)
 
-    RNS.log(f"[DEBUG] Server destination hash: {server_destination.hash.hex()}")
     RNS.log(f"[Server] BBS Server running. Identity hash: {RNS.prettyhexrep(server_destination.hash)}")
     RNS.log(f"[Server] Loaded {len(authorized_users)} authorized users.")
     RNS.log("[Server] Press Enter to send an ANNOUNCE. Ctrl-C to quit.")
@@ -142,23 +141,19 @@ def start_automatic_announce(server_destination):
     Starts a timer to send automatic announces at the configured interval.
     """
     def send_announce():
-        # Send an announce
         announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
         server_destination.announce(app_data=announce_data)
         RNS.log("[Server] Sent automatic announce")
 
-        # Schedule the next announce
         if announce_interval > 0:
             threading.Timer(announce_interval, send_announce).start()
 
-    # Start the first announce
     send_announce()
 
 def client_connected(link):
     global latest_client_link
 
     RNS.log("[Server] Client link established!")
-    RNS.log(f"[Server] Client destination: {RNS.prettyhexrep(link.destination.hash)}")
 
     link.set_link_closed_callback(client_disconnected)
     link.set_packet_callback(server_packet_received)
@@ -178,16 +173,12 @@ def remote_identified(link, identity):
     Called when the client calls link.identify(client_identity),
     so we know who they are by their public key hash.
     """
+    global server_name
+
     identity_hash_hex = identity.hash.hex()
     display_str = RNS.prettyhexrep(identity.hash)
 
     RNS.log(f"[Server] Remote identified as {display_str}")
-    RNS.log(f"[Server] Client destination after identification: {RNS.prettyhexrep(link.destination.hash)}")
-
-    if link.destination.hash == RNS.Transport.identity.hash:
-        RNS.log("[ERROR] Identified client destination matches server destination. This is not allowed!", RNS.LOG_ERROR)
-        link.teardown()
-        return
 
     # For demonstration, automatically authorize them
     if identity_hash_hex not in authorized_users:
@@ -201,10 +192,12 @@ def remote_identified(link, identity):
             save_authorized_users(auth_file_path, authorized_users)
     
     current_board = authorized_users[identity_hash_hex].get("current_board")
+    welcome_str = f"Welcome, {get_user_display(identity_hash_hex)} to the {server_name} RetiBBS Server!\n"
+
     if current_board:
-        reply = f"You have joined board '{current_board}'\n"
+        reply = f"{welcome_str}You have joined board '{current_board}'\n\n"
     else:
-        reply = "You are not in any board.\n"
+        reply = f"{welcome_str}You have not joined any board.\nUse the lb (LISTBOARDS) command to find a board to join.\n\n"
 
     send_link_reply(link, reply)
 
@@ -252,10 +245,11 @@ def server_packet_received(message_bytes, packet):
             "  b  | board <boardname>        - Switch to a board (so you can post/list by default)\n"
             "  p  | post <text>              - Post a message to your current board\n"
             "  l  | list [boardname]         - List messages in 'boardname' or your current board\n"
+            "  lo | logout                   - Log out\n\n"
         )
         if user_info.get("is_admin", False):
             reply += (
-                "\nAdmin Commands:\n"
+                "Admin Commands:\n"
                 "  cb | createboard <name>       - Create a new board\n"
                 "  db | deleteboard <boardname>  - Delete a board\n"
                 "  a  | admin <user_hash>        - Assign admin rights to a user\n"
@@ -267,6 +261,11 @@ def server_packet_received(message_bytes, packet):
         if user_info.get("is_admin", False):
             reply += "You have ADMIN rights.\n"
         send_link_reply(packet.link, reply)
+    
+    elif cmd in ["lo", "logout"]:
+        RNS.log(f"[Server] Client {user_display_name} has requested to logout.")
+        send_link_reply(packet.link, "You have been logged out. Goodbye!\n")
+        packet.link.teardown()
 
     elif cmd in ["n", "name"]:
         if not is_authorized:
@@ -449,9 +448,8 @@ def send_link_reply(link, text):
 
     if link.destination.hash == RNS.Transport.identity.hash:
         RNS.log(f"[ERROR] Attempted to send packet to self. Destination hash: {RNS.prettyhexrep(link.destination.hash)}", RNS.LOG_ERROR)
-        return  # Abort sending the packet
+        return
 
-    RNS.log(f"[Server] Sending packet reply to: {RNS.prettyhexrep(link.destination.hash)}")
     packet = RNS.Packet(link, data)
     packet.send()
 
@@ -471,7 +469,6 @@ def send_resource_reply(link, text):
     """
     data = text.encode("utf-8")
     resource = RNS.Resource(data, link)
-    RNS.log(f"[Server] Sending resource reply to: {RNS.prettyhexrep(link.destination.hash)}")
 
 auth_file_path = None
 
@@ -479,7 +476,7 @@ if __name__ == "__main__":
     try:
         parser = argparse.ArgumentParser(description="RetiBBS Server")
         parser.add_argument(
-            "--config",
+            "--reticulum-config",
             action="store",
             default=None,
             help="Path to alternative Reticulum config directory",
@@ -519,14 +516,14 @@ if __name__ == "__main__":
                 RNS.log(f"[Server] Loaded server name: '{server_name}' from {args.config_file}")
             except Exception as e:
                 RNS.log(f"[Server] Could not load server configuration: {e}", RNS.LOG_ERROR)
-                server_name = "RetibBS Server"  # Fallback to default name
+                server_name = "RetiBBS Server"  # Fallback to default name
                 announce_interval = 0   # Fallback to no announce
         else:
             RNS.log(f"[Server] Configuration file {args.config_file} not found. Using defaults.", RNS.LOG_WARNING)
             server_name = "RetiBBS Server"  # Default server name
             announce_interval = 0
 
-        server_setup(args.config, args.identity_file, args.auth_file, server_name, announce_interval)
+        server_setup(args.reticulum_config, args.identity_file, args.auth_file, server_name, announce_interval)
 
     except KeyboardInterrupt:
         print("")

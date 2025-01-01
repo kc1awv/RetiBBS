@@ -87,6 +87,27 @@ class ServerDetailScreen(ModalScreen):
         elif event.button.id == "close":
             self.app.pop_screen()
 
+class HelpScreen(ModalScreen):
+    """Screen to display help information."""
+
+    def compose(self) -> ComposeResult:
+        help_text = (
+            "Welcome to the RetiBBS Client!\n\n"
+            "Available Key Bindings:\n"
+            "  q      - Quit the application\n"
+            "  ?      - Show this help screen\n\n"
+            "Use the arrow keys to navigate the interface.\n"
+        )
+        yield Grid(
+            Label(help_text, id="help_text"),
+            Button("Close", id="close_help", variant="default", classes="button"),
+            id="help_dialog",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close_help":
+            self.app.pop_screen()
+
 class RetiBBSClient(App):
     CSS_PATH = "app.tcss"
 
@@ -161,11 +182,9 @@ class RetiBBSClient(App):
 
     def write_debug_log(self, message):
         try:
-            # Attempt to find the debug log and write the message
             debug_log = self.query_one("#debug_log", Log)
             debug_log.write_line(message)
         except Exception:
-            # Defer the message if the debug log is not found
             if not hasattr(self, "_deferred_debug_log"):
                 self._deferred_debug_log = []
             self._deferred_debug_log.append(message)
@@ -229,14 +248,13 @@ class RetiBBSClient(App):
         server_list.visible = True
         address_book.visible = True
 
-        # Log deferred errors (if any)
         if hasattr(self, "_deferred_debug_log"):
             for message in self._deferred_debug_log:
                 try:
                     debug_log = self.query_one("#debug_log", Log)
                     debug_log.write_line(message)
                 except Exception:
-                    continue  # Skip if still unavailable
+                    continue
             self._deferred_debug_log.clear()
 
         self.address_book = self.load_address_book()
@@ -261,7 +279,26 @@ class RetiBBSClient(App):
         if self.server_hexhash:
             await self.connect_client()
         else:
-            self.write_log("Server hexhash not provided. Please wait for an announce...")
+            self.write_log("Server hexhash not provided. Please wait for an announce...\n\n")
+    
+    async def action_quit(self) -> None:
+        """Handle cleanup on quit."""
+        try:
+            if self.link and self.link.status == RNS.Link.ACTIVE:
+                self.write_debug_log("[QUIT] Closing active link to the server.")
+                self.link.teardown()
+                await asyncio.sleep(1)
+                self.write_log("[QUIT] Connection to the server closed.")
+            else:
+                self.write_debug_log("[QUIT] No active link to close.")
+        except Exception as e:
+            self.write_debug_log(f"[QUIT] Error during cleanup: {e}")
+        finally:
+            self.exit()
+
+    def action_show_help(self):
+        """Show the help screen."""
+        self.push_screen(HelpScreen())
 
     async def connect_client(self, destination_hash=None):
         server_hexhash = destination_hash or self.server_hexhash
@@ -277,7 +314,7 @@ class RetiBBSClient(App):
                 return
 
             if not RNS.Transport.has_path(server_addr):
-                self.write_log("[CONNECT] Path to server unknown, requesting path and waiting for announce...")
+                self.write_log("[CONNECT] Path to server unknown, requesting path...")
                 RNS.Transport.request_path(server_addr)
                 timeout_t0 = asyncio.get_event_loop().time()
 
@@ -318,9 +355,9 @@ class RetiBBSClient(App):
             if self.link.status == RNS.Link.ACTIVE:
                 self.write_log("[CONNECT] Link is ACTIVE. Now identifying to server...")
                 self.link.identify(self.client_identity)
-                self.write_log("[CONNECT] Successfully connected to the server.")
+                self.write_log("[CONNECT] Successfully connected to the server.\n\n")
             else:
-                self.write_log("[CONNECT] Failed: Link could not be established.")
+                self.write_log("[CONNECT] Failed: Link could not be established.\n\n")
                 self.link = None
 
         except Exception as e:
@@ -352,40 +389,31 @@ class RetiBBSClient(App):
                 fileobj.seek(0)
                 data = fileobj.read()
                 text = data.decode("utf-8", "ignore")
-                self.write_log(f"[SERVER-RESOURCE]\n{text}")
+                self.write_log(f"{text}")
 
                 match = re.search(r"You have joined board '(.+)'", text)
                 if match:
                     board_name = match.group(1)
-                    self.write_log(f"You have joined board: {board_name}")
             except Exception as e:
                 self.write_log(f"[RESOURCE] Error processing resource data: {e}")
         else:
-            self.write_log("[SERVER-RESOURCE] Transfer concluded, but no data received!")
+            self.write_log("Transfer concluded, but no data received!")
 
-    # IMPORTANT: may need a refactoring, as this function is not working as
-    # expected. May need to be removed if the server switches to using resources
-    # only.
-    def on_packet_received(self, packet):
-        self.write_log("[SERVER-PACKET] Received packet.")
+    def on_packet_received(self, message_bytes, packet):
         try:
-            self.write_log(f"[DEBUG] Raw packet: {packet}")
-            self.write_log(f"[DEBUG] Packet data (bytes): {packet.data}")
-
-            text = packet.data.decode("utf-8", "ignore")
-            self.write_log(f"[SERVER-PACKET] Decoded text: {text}")
+            text = message_bytes.decode("utf-8", "ignore")
+            self.write_log(f"{text}")
 
             match = re.search(r"You have joined board '(.+)'", text)
             if match:
                 board_name = match.group(1)
-                self.write_log(f"You have joined board: {board_name}")
                 self.current_board = board_name
             elif "You are not in any board." in text:
                 self.write_log("You are not in any board.")
                 self.current_board = "None"
         except UnicodeDecodeError as e:
             self.write_log(f"[DEBUG] Error decoding packet data: {e}")
-            self.write_log(f"[DEBUG] Non-UTF-8 packet data: {packet.data.hex()}")
+            self.write_log(f"[DEBUG] Non-UTF-8 packet data: {message_bytes.data.hex()}")
         except Exception as e:
             self.write_log(f"[SERVER-PACKET] Error processing packet: {e}")
 
@@ -431,23 +459,21 @@ class RetiBBSClient(App):
 
     def update_server_list(self):
         try:
-            # Check if a modal is currently active
             if len(self.screen_stack) > 1 and isinstance(self.screen_stack[-1], ModalScreen):
                 if not self.server_list_update_pending:
-                    self.server_list_update_pending = True  # Set flag to avoid repeated deferrals
+                    self.server_list_update_pending = True
                     self.write_debug_log("[INFO] Modal is active, deferring server list update.")
-                    self.call_later(self.update_server_list)  # Defer the update
+                    self.call_later(self.update_server_list)
                 return
 
-            # Proceed with updating the server list
-            self.server_list_update_pending = False  # Reset the flag
+            self.server_list_update_pending = False
             server_list = self.query_one("#server_list", DataTable)
             server_list.clear()
             for server in self.servers.values():
                 server_list.add_row(server["display_name"], server["hash"])
             self.write_debug_log("[DEBUG] Server list updated successfully.")
         except Exception as e:
-            self.server_list_update_pending = False  # Ensure the flag is reset on error
+            self.server_list_update_pending = False
             self.write_debug_log(f"[ERROR] Error updating server list: {e}")
     
     def update_address_book(self):
@@ -480,13 +506,11 @@ class RetiBBSClient(App):
     
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         try:
-            # Get the triggering table
             triggering_table = event.control
-            table_id = triggering_table.id  # Retrieve the table's ID
+            table_id = triggering_table.id
             self.write_debug_log(f"[ACTION] Selected row in table: {table_id}, row key: {event.row_key}")
 
             if table_id == "server_list":
-                # Handle server list selection
                 row_data = triggering_table.get_row(event.row_key)
                 if row_data:
                     server_name, destination_hash = row_data
@@ -502,7 +526,6 @@ class RetiBBSClient(App):
                             )
                         )
             elif table_id == "address_book":
-                # Handle address book selection
                 row_data = triggering_table.get_row(event.row_key)
                 if row_data:
                     server_name, destination_hash = row_data
