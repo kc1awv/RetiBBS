@@ -197,7 +197,7 @@ def remote_identified(link, identity):
     if current_board:
         reply = f"{welcome_str}You have joined board '{current_board}'"
     else:
-        reply = f"{welcome_str}You have not joined any board.\nUse the lb (LISTBOARDS) command to find a board to join."
+        reply = f"{welcome_str}You have not joined any board.\nUse the lb (LISTBOARDS) command to find a board to join.\n? (help) for help."
 
     send_link_reply(link, reply)
 
