@@ -197,7 +197,7 @@ def remote_identified(link, identity):
     if current_board:
         reply = f"{welcome_str}You have joined board '{current_board}'"
     else:
-        reply = f"{welcome_str}You have not joined any board.\nUse the lb (LISTBOARDS) command to find a board to join.\n? (help) for help."
+        reply = f"{welcome_str}You have not joined any board.\nUse the lb (listboards) command to find a board to join.\n? (help) for help."
 
     send_link_reply(link, reply)
 
@@ -249,7 +249,7 @@ def server_packet_received(message_bytes, packet):
         )
         if user_info.get("is_admin", False):
             reply += (
-                "\nAdmin Commands:\n"
+                "\n\nAdmin Commands:\n"
                 "  cb | createboard <name>       - Create a new board\n"
                 "  db | deleteboard <boardname>  - Delete a board\n"
                 "  a  | admin <user_hash>        - Assign admin rights to a user"
