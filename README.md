@@ -44,7 +44,6 @@ python retibbs_server.py [OPTIONS]
 #### Server options:
 - `--reticulum-config`: Path to alternative Reticulum config directory (optional)
 - `--identity-file`: Path to store/load server identity (default: server_identity.pem)
-- `--auth-file`: Path to store/load authorized users (default: authorized.json)
 - `--config-file`: Path to server config file (default: server_config.json)
 
 ### Running the Client
@@ -55,7 +54,7 @@ python retibbs_textual.py [OPTIONS]
 
 #### Client options
 - `--reticulum-config`: Path to alternative Reticulum config directory (optional)
-- `--identity-file`: Path to store/load client identity (default: {RNS.Reticulum.storagepath}/retibbs_client_identity)
+- `--identity-file`: Path to store/load client identity (optional, default: {RNS.Reticulum.storagepath}/retibbs_client_identity)
 - `--server`: Hexadecimal hash of the RetiBBS server to connect to (optional)
 
 ## Basic Commands
@@ -82,7 +81,7 @@ python retibbs_textual.py [OPTIONS]
 ### Server Configuration (server_config.json)
 ```json
 {
-    "server_name": "My RetiBBS Server",
+    "server_name": "changeme",
     "announce_interval": 300
 }
 ```

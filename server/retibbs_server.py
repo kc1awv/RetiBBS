@@ -7,34 +7,21 @@ import sys
 import threading
 import RNS
 
+from announcer import AutomaticAnnouncer
 from boards import BoardsManager
+from users import UsersManager
 
 APP_NAME = "retibbs"
 SERVICE_NAME = "bbs"
+HEARTBEAT_INTERVAL = 10
+CONNECTION_TIMEOUT = 30
 
+users_mgr = UsersManager()
 boards_mgr = BoardsManager()
-authorized_users = {}
 latest_client_link = None
-
 announce_interval = None
-
-class AutomaticAnnouncer(threading.Thread):
-    def __init__(self, server_destination, interval):
-        super().__init__()
-        self.server_destination = server_destination
-        self.interval = interval
-        self.stop_event = threading.Event()
-        self.daemon = True
-
-    def run(self):
-        while not self.stop_event.is_set():
-            time.sleep(self.interval)
-            announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
-            self.server_destination.announce(app_data=announce_data)
-            RNS.log("[Server] Sent automatic announce")
-
-    def stop(self):
-        self.stop_event.set()
+active_links = set()
+client_last_active = {}
 
 def load_or_create_identity(identity_path):
     """
@@ -49,59 +36,12 @@ def load_or_create_identity(identity_path):
         RNS.log(f"[Server] Created new server Identity and saved to {identity_path}")
     return server_identity
 
-def load_authorized_users(auth_path):
-    """
-    Loads authorized users from JSON, returning a dict:
-      { <hash_hex>: {"name": <string or None>, "current_board": <str or None> } }
-    If file doesn't exist, returns an empty dict.
-    """
-    if os.path.isfile(auth_path):
-        try:
-            with open(auth_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            RNS.log(f"[Server] Could not load authorized users: {e}", RNS.LOG_ERROR)
-            return {}
-    else:
-        return {}
-
-def save_authorized_users(auth_path, user_dict):
-    """
-    Saves the authorized user dictionary to a JSON file.
-    """
-    try:
-        with open(auth_path, "w", encoding="utf-8") as f:
-            json.dump(user_dict, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        RNS.log(f"[Server] Could not save authorized users: {e}", RNS.LOG_ERROR)
-
-def get_user_display(hash_hex):
-    """
-    Return the user's name if set, or a pretty hex rep of hash if no name is set.
-    """
-    if hash_hex in authorized_users:
-        user_info = authorized_users[hash_hex]
-        if user_info["name"] is not None:
-            return user_info["name"]
-    short_hash = RNS.prettyhexrep(bytes.fromhex(hash_hex))
-    return short_hash
-
-def is_name_taken(name, own_hash_hex=None):
-    """
-    Check if any other user is using this 'name' (case-sensitive check).
-    If own_hash_hex is given, ignore that user.
-    """
-    for h, info in authorized_users.items():
-        if h != own_hash_hex and info["name"] == name:
-            return True
-    return False
-
-def server_setup(configpath, identity_file, auth_file, server_name, announce_interval):
-    global authorized_users, boards_mgr
+def server_setup(configpath, identity_file, server_name, announce_interval):
+    global users_mgr, boards_mgr
 
     reticulum = RNS.Reticulum(configpath)
     server_identity = load_or_create_identity(identity_file)
-    authorized_users = load_authorized_users(auth_file)
+    
     server_destination = RNS.Destination(
         server_identity,
         RNS.Destination.IN,
@@ -112,11 +52,10 @@ def server_setup(configpath, identity_file, auth_file, server_name, announce_int
     server_destination.set_link_established_callback(client_connected)
 
     RNS.log(f"[Server] BBS Server running. Identity hash: {RNS.prettyhexrep(server_destination.hash)}")
-    RNS.log(f"[Server] Loaded {len(authorized_users)} authorized users.")
     RNS.log("[Server] Press Enter to send an ANNOUNCE. Ctrl-C to quit.")
 
     if announce_interval > 0:
-        announcer = AutomaticAnnouncer(server_destination, announce_interval)
+        announcer = AutomaticAnnouncer(server_destination, announce_interval, server_name)
         announcer.start()
         RNS.log(f"[Server] Automatic announce set to every {announce_interval} seconds.")
 
@@ -151,7 +90,10 @@ def start_automatic_announce(server_destination):
     send_announce()
 
 def client_connected(link):
-    global latest_client_link
+    global latest_client_link, active_links
+
+    active_links.add(link)
+    client_last_active[link.destination.hash.hex()] = time.time()
 
     RNS.log("[Server] Client link established!")
 
@@ -166,32 +108,23 @@ def client_connected(link):
     # link.set_resource_concluded_callback(resource_concluded_callback)
 
 def client_disconnected(link):
+    global active_links, client_last_active
+    identity_hash_hex = link.destination.hash.hex()
+    active_links.discard(link)
+    client_last_active.pop(identity_hash_hex, None)
     RNS.log("[Server] Client disconnected.")
 
 def remote_identified(link, identity):
-    """
-    Called when the client calls link.identify(client_identity),
-    so we know who they are by their public key hash.
-    """
-    global server_name
-
     identity_hash_hex = identity.hash.hex()
     display_str = RNS.prettyhexrep(identity.hash)
 
     RNS.log(f"[Server] Remote identified as {display_str}")
 
-    # For demonstration, automatically authorize them
-    if identity_hash_hex not in authorized_users:
-        authorized_users[identity_hash_hex] = {
-            "name": None,
-            "current_board": None,
-            "is_admin": False
-        }
+    if not users_mgr.get_user(identity_hash_hex):
+        users_mgr.add_user(identity_hash_hex)
         RNS.log(f"[Server] Added new user {display_str} to authorized list.")
-        if auth_file_path:
-            save_authorized_users(auth_file_path, authorized_users)
-    
-    current_board = authorized_users[identity_hash_hex].get("current_board")
+
+    current_board = users_mgr.get_user(identity_hash_hex).get("current_board")
     welcome_str = f"Welcome, {get_user_display(identity_hash_hex)} to the {server_name} RetiBBS Server!\n"
 
     if current_board:
@@ -201,12 +134,21 @@ def remote_identified(link, identity):
 
     send_link_reply(link, reply)
 
+def get_user_display(hash_hex):
+    user = users_mgr.get_user(hash_hex)
+    if user and user["name"]:
+        return user["name"]
+    return RNS.prettyhexrep(bytes.fromhex(hash_hex))
+
+def is_name_taken(name, own_hash_hex=None):
+    users = users_mgr.list_users()
+    for user in users:
+        if user["hash_hex"] != own_hash_hex and user["name"] == name:
+            return True
+    return False
+
 def server_packet_received(message_bytes, packet):
-    """
-    Called when the client sends a PACKET. Large data or resources from the client
-    would appear differently. For responding with large data, we use RNS.Resource.
-    """
-    global authorized_users
+    global client_last_active
 
     remote_identity = packet.link.get_remote_identity()
     if not remote_identity:
@@ -214,195 +156,174 @@ def server_packet_received(message_bytes, packet):
         return
 
     identity_hash_hex = remote_identity.hash.hex()
-    user_info = authorized_users.get(identity_hash_hex, {})
+    client_last_active[identity_hash_hex] = time.time()
+    user_info = users_mgr.get_user(identity_hash_hex)
     user_display_name = get_user_display(identity_hash_hex)
 
-    try:
-        msg_str = message_bytes.decode("utf-8").strip()
-    except:
-        RNS.log("[Server] Error decoding message!")
+    if message_bytes == b"PING":
+        try:
+            reply_packet = RNS.Packet(packet.link, b"PONG")
+            reply_packet.send()
+            RNS.log(f"[Server] Received PING from {identity_hash_hex}, sent PONG", RNS.LOG_DEBUG)
+        except Exception as e:
+            RNS.log(f"[Server] Error sending PONG: {e}", RNS.LOG_ERROR)
         return
-
-    RNS.log(f"[Server] Received: {msg_str} from {user_display_name}")
-
-    tokens = msg_str.split(None, 1)
-    if not tokens:
-        send_link_reply(packet.link, "UNKNOWN COMMAND\n")
-        return
-
-    cmd = tokens[0].lower()
-    remainder = tokens[1] if len(tokens) > 1 else ""
-
-    is_authorized = (identity_hash_hex in authorized_users)
-
-    if cmd in ["?", "help"]:
-        reply = (
-            "Available Commands:\n"
-            "  ?  | help                     - Show this help text\n"
-            "  h  | hello                    - Check authorization\n"
-            "  n  | name <name>              - Set display name\n"
-            "  lb | listboards               - List all boards\n"
-            "  b  | board <boardname>        - Switch to a board (so you can post/list by default)\n"
-            "  p  | post <text>              - Post a message to your current board\n"
-            "  l  | list [boardname]         - List messages in 'boardname' or your current board\n"
-            "  lo | logout                   - Log out"
-        )
-        if user_info.get("is_admin", False):
-            reply += (
-                "\n\nAdmin Commands:\n"
-                "  cb | createboard <name>       - Create a new board\n"
-                "  db | deleteboard <boardname>  - Delete a board\n"
-                "  a  | admin <user_hash>        - Assign admin rights to a user"
-        )
-        send_resource_reply(packet.link, reply)
-    
-    elif cmd in ["h", "hello"]:
-        reply = f"Hello, {user_display_name}. You are {'AUTHORIZED' if is_authorized else 'UNAUTHORIZED'}."
-        if user_info.get("is_admin", False):
-            reply += "\nYou have ADMIN rights."
-        send_link_reply(packet.link, reply)
-    
-    elif cmd in ["lo", "logout"]:
-        RNS.log(f"[Server] Client {user_display_name} has requested to logout.")
-        send_link_reply(packet.link, "You have been logged out. Goodbye!\n")
-        packet.link.teardown()
-
-    elif cmd in ["n", "name"]:
-        if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED")
-            return
-
-        proposed_name = remainder.strip()
-        if not proposed_name:
-            send_link_reply(packet.link, "NAME command requires a non-empty name.")
-            return
-
-        if is_name_taken(proposed_name, own_hash_hex=identity_hash_hex):
-            send_link_reply(packet.link, f"ERROR: The name '{proposed_name}' is already taken.")
-            return
-
-        authorized_users[identity_hash_hex]["name"] = proposed_name
-        send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
-
-        if auth_file_path:
-            save_authorized_users(auth_file_path, authorized_users)
-    
-    elif cmd in ["lb", "listboards"]:
-        handle_list_boards(packet)
-
-    elif cmd in ["b", "board"]:
-        if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED")
-            return
-
-        board_name = remainder.strip()
-        if not board_name:
-            send_link_reply(packet.link, "Usage: BOARD <board_name>")
-            return
-
-        handle_join_board(packet, identity_hash_hex, board_name)
-
-    elif cmd in ["p", "post"]:
-        if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED")
-            return
-
-        post_text = remainder.strip()
-        if not post_text:
-            send_link_reply(packet.link, "Usage: POST <text>")
-            return
-
-        board_name = user_info.get("current_board")
-        if not board_name:
-            send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
-            return
-
-        boards_mgr.post_message(board_name, user_display_name, post_text)
-        reply = f"Posted to board '{board_name}': {post_text}"
-        send_link_reply(packet.link, reply)
-
-    elif cmd in ["l", "list"]:
-        board_name = remainder.strip()
-        if board_name:
-            handle_list_board(packet, board_name)
-        else:
-            cur_board = user_info.get("current_board")
-            if not cur_board:
-                send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
-            else:
-                handle_list_board(packet, cur_board)
-
-    elif cmd in ["cb", "createboard"]:
-        if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED")
-            return
-        
-        user_info = authorized_users.get(identity_hash_hex, {})
-        if not user_info.get("is_admin", False):
-            send_link_reply(packet.link, "ERROR: Only admins can create boards.")
-            return
-
-        board_name = remainder.strip()
-        if not board_name:
-            send_link_reply(packet.link, "Usage: CREATEBOARD <board_name>")
-            return
-        
-        if not is_valid_board_name(board_name):
-            send_link_reply(packet.link, "ERROR: Invalid board name. Must be alphanumeric and 3-20 characters long.")
-            return
-
-        boards_mgr.create_board(board_name)
-        send_link_reply(packet.link, f"Board '{board_name}' is ready.")
-
-    elif cmd in ["db", "deleteboard"]:
-        if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED")
-            return
-        
-        user_info = authorized_users.get(identity_hash_hex, {})
-        if not user_info.get("is_admin", False):
-            send_link_reply(packet.link, "ERROR: Only admins can delete boards.")
-            return
-
-        board_name = remainder.strip()
-        if not board_name:
-            send_link_reply(packet.link, "Usage: DELETEBOARD <board_name>")
-            return
-
-        success = boards_mgr.delete_board(board_name)
-        if success:
-            reply = f"Board '{board_name}' has been deleted."
-        else:
-            reply = f"Board '{board_name}' does not exist."
-        send_link_reply(packet.link, reply)
-
-    elif cmd in ["a", "admin"]:
-        if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED")
-            return
-
-        user_info = authorized_users.get(identity_hash_hex, {})
-        if not user_info.get("is_admin", False):
-            send_link_reply(packet.link, "ERROR: Only admins can assign admin rights.")
-            return
-
-        target_hash = remainder.strip()
-        if not target_hash:
-            send_link_reply(packet.link, "Usage: ADMIN <user_hash>")
-            return
-
-        if target_hash not in authorized_users:
-            send_link_reply(packet.link, "ERROR: User does not exist.")
-            return
-
-        authorized_users[target_hash]["is_admin"] = True
-        send_link_reply(packet.link, f"User {get_user_display(target_hash)} has been granted admin rights.")
-
-        if auth_file_path:
-            save_authorized_users(auth_file_path, authorized_users)
-
     else:
-        send_link_reply(packet.link, "UNKNOWN COMMAND")
+        try:
+            msg_str = message_bytes.decode("utf-8").strip()
+        except:
+            RNS.log("[Server] Error decoding message!")
+            return
+
+        RNS.log(f"[Server] Received: {msg_str} from {user_display_name}")
+
+        tokens = msg_str.split(None, 1)
+        if not tokens:
+            send_link_reply(packet.link, "UNKNOWN COMMAND\n")
+            return
+
+        cmd = tokens[0].lower()
+        remainder = tokens[1] if len(tokens) > 1 else ""
+
+        if cmd in ["?", "help"]:
+            reply = (
+                "Available Commands:\n"
+                "  ?  | help                     - Show this help text\n"
+                "  h  | hello                    - Check authorization\n"
+                "  n  | name <name>              - Set display name\n"
+                "  lb | listboards               - List all boards\n"
+                "  b  | board <boardname>        - Switch to a board (so you can post/list by default)\n"
+                "  p  | post <text>              - Post a message to your current board\n"
+                "  l  | list [boardname]         - List messages in 'boardname' or your current board\n"
+                "  lo | logout                   - Log out"
+            )
+            if user_info.get("is_admin", False):
+                reply += (
+                    "\n\nAdmin Commands:\n"
+                    "  cb | createboard <name>       - Create a new board\n"
+                    "  db | deleteboard <boardname>  - Delete a board\n"
+                    "  a  | admin <user_hash>        - Assign admin rights to a user"
+            )
+            send_resource_reply(packet.link, reply)
+
+        elif cmd in ["h", "hello"]:
+            reply = f"Hello, {user_display_name}."
+            if user_info.get("is_admin", False):
+                reply += "\nYou have ADMIN rights."
+            send_link_reply(packet.link, reply)
+
+        elif cmd in ["lo", "logout"]:
+            RNS.log(f"[Server] Client {user_display_name} has requested to logout.")
+            send_link_reply(packet.link, "You have been logged out. Goodbye!\n")
+            packet.link.teardown()
+
+        elif cmd in ["n", "name"]:
+            proposed_name = remainder.strip()
+            if not proposed_name:
+                send_link_reply(packet.link, "NAME command requires a non-empty name.")
+                return
+
+            if is_name_taken(proposed_name, own_hash_hex=identity_hash_hex):
+                send_link_reply(packet.link, f"ERROR: The name '{proposed_name}' is already taken.")
+                return
+
+            users_mgr.update_user(identity_hash_hex, name=proposed_name)
+            send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
+
+        elif cmd in ["lb", "listboards"]:
+            handle_list_boards(packet)
+
+        elif cmd in ["b", "board"]:
+            board_name = remainder.strip()
+            if not board_name:
+                send_link_reply(packet.link, "Usage: BOARD <board_name>")
+                return
+
+            handle_join_board(packet, identity_hash_hex, board_name)
+
+        elif cmd in ["p", "post"]:
+            post_text = remainder.strip()
+            if not post_text:
+                send_link_reply(packet.link, "Usage: POST <text>")
+                return
+
+            board_name = user_info.get("current_board")
+            if not board_name:
+                send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
+                return
+
+            boards_mgr.post_message(board_name, user_display_name, post_text)
+            reply = f"Posted to board '{board_name}': {post_text}"
+            send_link_reply(packet.link, reply)
+
+        elif cmd in ["l", "list"]:
+            board_name = remainder.strip()
+            if board_name:
+                handle_list_board(packet, board_name)
+            else:
+                cur_board = user_info.get("current_board")
+                if not cur_board:
+                    send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
+                else:
+                    handle_list_board(packet, cur_board)
+
+        elif cmd in ["cb", "createboard"]:
+            user_info = users_mgr.get_user(identity_hash_hex)
+            if not user_info.get("is_admin", False):
+                send_link_reply(packet.link, "ERROR: Only admins can create boards.")
+                return
+
+            board_name = remainder.strip()
+            if not board_name:
+                send_link_reply(packet.link, "Usage: CREATEBOARD <board_name>")
+                return
+
+            if not is_valid_board_name(board_name):
+                send_link_reply(packet.link, "ERROR: Invalid board name. Must be alphanumeric and 3-20 characters long.")
+                return
+
+            boards_mgr.create_board(board_name)
+            send_link_reply(packet.link, f"Board '{board_name}' is ready.")
+
+        elif cmd in ["db", "deleteboard"]:
+            user_info = users_mgr.get_user(identity_hash_hex)
+            if not user_info.get("is_admin", False):
+                send_link_reply(packet.link, "ERROR: Only admins can delete boards.")
+                return
+
+            board_name = remainder.strip()
+            if not board_name:
+                send_link_reply(packet.link, "Usage: DELETEBOARD <board_name>")
+                return
+
+            success = boards_mgr.delete_board(board_name)
+            if success:
+                reply = f"Board '{board_name}' has been deleted."
+            else:
+                reply = f"Board '{board_name}' does not exist."
+            send_link_reply(packet.link, reply)
+
+        elif cmd in ["a", "admin"]:
+            user_info = users_mgr.get_user(identity_hash_hex)
+            if not user_info.get("is_admin", False):
+                send_link_reply(packet.link, "ERROR: Only admins can assign admin rights.")
+                return
+
+            target_hash = remainder.strip()
+            if not target_hash:
+                send_link_reply(packet.link, "Usage: ADMIN <user_hash>")
+                return
+
+            target_user = users_mgr.get_user(target_hash)
+            if not target_user:
+                send_link_reply(packet.link, "ERROR: User does not exist.")
+                return
+
+            users_mgr.update_user(target_hash, is_admin=True)
+            send_link_reply(packet.link, f"User {get_user_display(target_hash)} has been granted admin rights.")
+
+        else:
+            send_link_reply(packet.link, "UNKNOWN COMMAND")
 
 def is_valid_board_name(board_name):
     """
@@ -412,13 +333,13 @@ def is_valid_board_name(board_name):
     return board_name.isalnum() and 3 <= len(board_name) <= 20
 
 def handle_join_board(packet, user_hash_hex, board_name):
-    user_info = authorized_users[user_hash_hex]
+    user_info = users_mgr.get_user(user_hash_hex)
     current = user_info.get("current_board")
 
     if current == board_name:
         reply = f"You are already in board '{board_name}'"
     else:
-        user_info["current_board"] = board_name
+        users_mgr.update_user(user_hash_hex, current_board=board_name)
         reply = f"You have joined board '{board_name}'"
 
     send_link_reply(packet.link, reply)
@@ -470,8 +391,6 @@ def send_resource_reply(link, text):
     data = text.encode("utf-8")
     resource = RNS.Resource(data, link)
 
-auth_file_path = None
-
 if __name__ == "__main__":
     try:
         parser = argparse.ArgumentParser(description="RetiBBS Server")
@@ -490,13 +409,6 @@ if __name__ == "__main__":
             type=str
         )
         parser.add_argument(
-            "--auth-file",
-            action="store",
-            default="authorized.json",
-            help="Path to store or load authorized user data",
-            type=str
-        )
-        parser.add_argument(
             "--config-file",
             action="store",
             default="server_config.json",
@@ -504,8 +416,6 @@ if __name__ == "__main__":
             type=str
         )
         args = parser.parse_args()
-
-        auth_file_path = args.auth_file
 
         if os.path.isfile(args.config_file):
             try:
@@ -523,7 +433,7 @@ if __name__ == "__main__":
             server_name = "RetiBBS Server"  # Default server name
             announce_interval = 0
 
-        server_setup(args.reticulum_config, args.identity_file, args.auth_file, server_name, announce_interval)
+        server_setup(args.reticulum_config, args.identity_file, server_name, announce_interval)
 
     except KeyboardInterrupt:
         print("")

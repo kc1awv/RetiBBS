@@ -1,5 +1,6 @@
 Screen {
     layout: vertical;
+    scrollbar-gutter: auto;
 }
 
 #main_body {
@@ -10,35 +11,46 @@ Screen {
 
 #main_log {
     height: 1fr;
-    border: none;
+    border: round gray;
     padding: 0 1;
-    background: black;
-    color: white;
+    overflow: auto;
+}
+
+#debug_log {
+    height: 1fr;
+    border: round gray;
+    padding: 0 1;
+    overflow: auto;
 }
 
 #connection_status {
     padding: 0 1;
 }
+#connection_latency {
+    padding: 0 1;
+}
 
-.address_book {
+#command_input {
+    height: 3;
+    border: round lightgrey;
+}
+
+.screens {
     height: 1fr;
 }
 
 .server-list {
     height: 1fr;
+    border: round gray;
+}
+
+.address-book {
+    height: 1fr;
+    border: round gray;
 }
 
 .tabs {
     height: 1fr;
-}
-
-.debug-log {
-    height: 7;
-    border: round gray;
-    padding: 0 1;
-    background: #1e1e1e;
-    color: #aaaaaa;
-    overflow: auto;
 }
 
 #left_panel {
@@ -49,16 +61,9 @@ Screen {
     width: 30%; /* Adjust as needed */
 }
 
-#command_input {
-    height: 3;
-    border: round lightgrey;
-}
-
 .log-message {
-    padding: 0;          /* Ensure no extra padding inside log messages */
-    margin: 0;           /* Remove any margin around log messages */
-    background: transparent;    /* No background unless explicitly needed */
-    color: white;        /* Text color */
+    padding: 0;
+    margin: 0;
 }
 
 HelpScreen {
