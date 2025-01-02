@@ -11,6 +11,8 @@ from textual.containers import Horizontal, Vertical, Grid
 from textual.screen import ModalScreen
 from textual.widgets import Header, Footer, TabbedContent, TabPane, Input, Log, DataTable, Static, Button, Label
 
+from rich.text import Text
+
 import RNS
 
 ADDRESS_BOOK_FILE = "address_book.json"
@@ -42,12 +44,20 @@ class AnnounceHandler:
             "timestamp": timestamp
         }
 
+        self.app.servers[dest_hash_raw] = announce_message
+
+        if dest_hash_raw in self.app.address_book:
+            self.app.address_book[dest_hash_raw]["timestamp"] = timestamp
+            self.app.save_address_book()
+            self.app.update_address_book()
+
+        self.app.on_announce(destination_hash, announced_identity, app_data)
+
         # OPTIONAL: Add to app log
         #self.app.write_debug_log(
         #    f"[ANNOUNCE] {timestamp} - {display_name} ({dest_hash_display})"
         #)
 
-        self.app.on_announce(destination_hash, announced_identity, app_data)
 
 class ServerDetailScreen(ModalScreen):
     """Screen to display server details."""
@@ -131,6 +141,8 @@ class RetiBBSClient(App):
         self.address_book = {}
         self.active_tab = "servers"
         self.server_list_update_pending = False
+        self.connection_status = "Not Connected"
+        self.current_server_name = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -153,6 +165,7 @@ class RetiBBSClient(App):
         yield Horizontal(
             Vertical(
                 Log(id="main_log"),
+                Static(self.connection_status, id="connection_status"),
                 Input(placeholder="Enter command...", id="command_input"),
                 id="left_panel"
             ),
@@ -193,7 +206,10 @@ class RetiBBSClient(App):
         log = self.query_one("#main_log", Log)
         log.write_line(message)
 
-    def load_or_create_identity(self, identity_path):
+    def load_or_create_identity(self, identity_path=None):
+        if not identity_path:
+            identity_path = f"{RNS.Reticulum.storagepath}/retibbs_client_identity"
+
         if os.path.exists(identity_path):
             identity = RNS.Identity.from_file(identity_path)
             RNS.log(f"[INIT] Loaded existing identity from {identity_path}. Hash: {identity.hash.hex()}")
@@ -205,22 +221,23 @@ class RetiBBSClient(App):
 
     def initialize_reticulum(self):
         try:
-            RNS.Reticulum()
-            self.write_debug_log("[INIT] Reticulum initialized successfully.")
+            if hasattr(self, "reticulum_config_path") and self.reticulum_config_path:
+                RNS.Reticulum.initialize(self.reticulum_config_path)
+                self.write_debug_log(f"[INIT] Reticulum initialized with config: {self.reticulum_config_path}.")
+            else:
+                RNS.Reticulum()
+                self.write_debug_log("[INIT] Reticulum initialized with default config.")
         except Exception as e:
             self.write_debug_log(f"[INIT] Error initializing Reticulum: {e}")
             raise e
 
     def initialize_client(self):
         try:
-            identity_path = f"{RNS.Reticulum.storagepath}/retibbs_client_identity"
-            self.write_debug_log(f"[DEBUG] Identity file path: {identity_path}")
-
-            self.client_identity = self.load_or_create_identity(identity_path)
-            self.write_debug_log(f"[DEBUG] Client identity hash: {self.client_identity.hash.hex()}")
+            self.write_debug_log(f"[INIT] Using identity file: {self.identity_file_path or 'default'}")
+            self.client_identity = self.load_or_create_identity(self.identity_file_path)
+            self.write_debug_log(f"[INIT] Client identity hash: {self.client_identity.hash.hex()}")
 
             self.register_announce_handler()
-
         except Exception as e:
             self.write_log(f"[INIT] Failed to initialize client: {e}")
             RNS.log(f"[CLIENT] Error initializing client: {e}", RNS.LOG_ERROR)
@@ -260,6 +277,8 @@ class RetiBBSClient(App):
         self.address_book = self.load_address_book()
         self.update_address_book()
 
+        self.update_connection_status()
+
         self.write_log("Initializing Reticulum...")
         try:
             self.initialize_reticulum()
@@ -279,7 +298,7 @@ class RetiBBSClient(App):
         if self.server_hexhash:
             await self.connect_client()
         else:
-            self.write_log("Server hexhash not provided. Please wait for an announce...\n\n")
+            self.write_log("Server hexhash not provided from the command line.\nSelect a server from your address book or please wait for an announce...")
     
     async def action_quit(self) -> None:
         """Handle cleanup on quit."""
@@ -288,7 +307,7 @@ class RetiBBSClient(App):
                 self.write_debug_log("[QUIT] Closing active link to the server.")
                 self.link.teardown()
                 await asyncio.sleep(1)
-                self.write_log("[QUIT] Connection to the server closed.")
+                self.on_link_closed(self.link)
             else:
                 self.write_debug_log("[QUIT] No active link to close.")
         except Exception as e:
@@ -300,14 +319,31 @@ class RetiBBSClient(App):
         """Show the help screen."""
         self.push_screen(HelpScreen())
 
+    def update_connection_status(self):
+        """Update the connection status line."""
+        if self.link and self.link.status == RNS.Link.ACTIVE:
+            indicator = Text("[✔] ", style="bold green")
+            status = f"Connected to {self.current_server_name or 'Unknown Server'}"
+            if hasattr(self, "current_board") and self.current_board:
+                status += f" | (Board: {self.current_board})"
+        else:
+            indicator = Text("[✗] ", style="red")
+            status = "Not Connected"
+        status_widget = self.query_one("#connection_status", Static)
+        status_widget.update(indicator + Text(status))
+
     async def connect_client(self, destination_hash=None):
         server_hexhash = destination_hash or self.server_hexhash
         if not server_hexhash:
             self.write_log("[CONNECT] Failed: No server hexhash provided.")
+            self.update_connection_status()
             return
 
         try:
             try:
+                server_info = self.address_book.get(server_hexhash) or self.servers.get(server_hexhash)
+                self.current_server_name = server_info.get("display_name", "Unknown Server") if server_info else "Unknown Server"
+                self.update_connection_status()
                 server_addr = bytes.fromhex(server_hexhash)
             except ValueError:
                 self.write_log(f"[CONNECT] Failed: Invalid server hexhash: {server_hexhash}.")
@@ -317,7 +353,6 @@ class RetiBBSClient(App):
                 self.write_log("[CONNECT] Path to server unknown, requesting path...")
                 RNS.Transport.request_path(server_addr)
                 timeout_t0 = asyncio.get_event_loop().time()
-
                 while not RNS.Transport.has_path(server_addr):
                     if asyncio.get_event_loop().time() - timeout_t0 > 15:
                         self.write_log("[CONNECT] Failed: Timed out waiting for path.")
@@ -327,6 +362,7 @@ class RetiBBSClient(App):
             server_identity = RNS.Identity.recall(server_addr)
             if not server_identity:
                 self.write_log("[CONNECT] Failed: Could not recall server Identity.")
+                self.update_connection_status()
                 return
 
             server_destination = RNS.Destination(
@@ -348,21 +384,23 @@ class RetiBBSClient(App):
             self.link.set_resource_concluded_callback(self.on_resource_concluded)
 
             self.write_log("[CONNECT] Establishing link with server...")
-            RNS.log("[CLIENT] Establishing link with server...")
-
             await self.wait_for_link()
 
             if self.link.status == RNS.Link.ACTIVE:
                 self.write_log("[CONNECT] Link is ACTIVE. Now identifying to server...")
                 self.link.identify(self.client_identity)
                 self.write_log("[CONNECT] Successfully connected to the server.\n\n")
+                self.update_connection_status()
             else:
                 self.write_log("[CONNECT] Failed: Link could not be established.\n\n")
                 self.link = None
+                self.current_server_name = None
+                self.update_connection_status()
 
         except Exception as e:
             self.write_log(f"[CONNECT] Failed: Error connecting to server: {e}")
-            RNS.log(f"[CLIENT] Error connecting to server: {e}", RNS.LOG_ERROR)
+            self.current_server_name = None
+            self.update_connection_status()
 
     async def wait_for_link(self):
         timeout_t0 = asyncio.get_event_loop().time()
@@ -377,6 +415,10 @@ class RetiBBSClient(App):
         self.write_debug_log(f"[DEBUG] Link status: {link.status}")
     
     def on_link_closed(self, link):
+        self.link = None
+        self.current_server_name = None
+        self.current_board = None
+        self.update_connection_status()
         self.write_log("Disconnected from the RetiBBS server.")
 
     def on_resource_started(self, resource):
@@ -390,10 +432,6 @@ class RetiBBSClient(App):
                 data = fileobj.read()
                 text = data.decode("utf-8", "ignore")
                 self.write_log(f"{text}")
-
-                match = re.search(r"You have joined board '(.+)'", text)
-                if match:
-                    board_name = match.group(1)
             except Exception as e:
                 self.write_log(f"[RESOURCE] Error processing resource data: {e}")
         else:
@@ -409,8 +447,8 @@ class RetiBBSClient(App):
                 board_name = match.group(1)
                 self.current_board = board_name
             elif "You are not in any board." in text:
-                self.write_log("You are not in any board.")
                 self.current_board = "None"
+            self.update_connection_status()
         except UnicodeDecodeError as e:
             self.write_log(f"[DEBUG] Error decoding packet data: {e}")
             self.write_log(f"[DEBUG] Non-UTF-8 packet data: {message_bytes.data.hex()}")
@@ -420,7 +458,7 @@ class RetiBBSClient(App):
     async def on_input_submitted(self, message: Input.Submitted):
         command = message.value.strip()
         if command:
-            self.write_log(f"Command: {command}")
+            self.write_log(f"\nCommand: {command}")
             if self.link and self.link.status == RNS.Link.ACTIVE:
                 try:
                     packet = RNS.Packet(self.link, command.encode("utf-8"))
@@ -546,6 +584,18 @@ class RetiBBSClient(App):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RetiBBS Client")
     parser.add_argument(
+        "--reticulum-config",
+        type=str,
+        required=False,
+        help="Path to an alternative Reticulum configuration directory",
+    )
+    parser.add_argument(
+        "--identity-file",
+        type=str,
+        required=False,
+        help="Path to an alternative client identity file",
+    )
+    parser.add_argument(
         "--server",
         type=str,
         required=False,
@@ -554,4 +604,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     app = RetiBBSClient(server_hexhash=args.server)
+    app.reticulum_config_path = args.reticulum_config
+    app.identity_file_path = args.identity_file
     app.run()

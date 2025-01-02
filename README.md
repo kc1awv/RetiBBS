@@ -54,11 +54,9 @@ python retibbs_textual.py [OPTIONS]
 ```
 
 #### Client options
-- `--server`: Hexadecimal hash of the RetiBBS server to connect to (optional)
-
-#### Future client options
 - `--reticulum-config`: Path to alternative Reticulum config directory (optional)
-- `--identity-file`: Path to store/load server identity (default: client_identity.pem)
+- `--identity-file`: Path to store/load client identity (default: {RNS.Reticulum.storagepath}/retibbs_client_identity)
+- `--server`: Hexadecimal hash of the RetiBBS server to connect to (optional)
 
 ## Basic Commands
 
