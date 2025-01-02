@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
 import argparse
 import asyncio
 import json
 import os
 import re
+import threading
 import time
 
 from textual.app import App, ComposeResult
@@ -13,110 +15,14 @@ from textual.widgets import Header, Footer, TabbedContent, TabPane, Input, Log, 
 
 from rich.text import Text
 
+from announce_handler import AnnounceHandler
+from modals import ServerDetailScreen, HelpScreen
+
 import RNS
 
+PING_INTERVAL = 10
+PING_TIMEOUT = 15
 ADDRESS_BOOK_FILE = "address_book.json"
-
-class AnnounceHandler:
-    def __init__(self, app, aspect_filter=None):
-        self.app = app
-        self.aspect_filter = aspect_filter
-
-    def received_announce(self, destination_hash, announced_identity, app_data):
-        dest_hash_raw = destination_hash.hex()
-        dest_hash_display = RNS.prettyhexrep(destination_hash)
-        display_name = dest_hash_display
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-        if app_data:
-            try:
-                app_data_json = json.loads(app_data.decode("utf-8"))
-                if "server_name" in app_data_json:
-                    display_name = app_data_json["server_name"]
-                elif "client_name" in app_data_json:
-                    display_name = app_data_json["client_name"]
-            except json.JSONDecodeError:
-                pass
-
-        announce_message = {
-            "display_name": display_name,
-            "dest_hash": dest_hash_raw,
-            "timestamp": timestamp
-        }
-
-        self.app.servers[dest_hash_raw] = announce_message
-
-        if dest_hash_raw in self.app.address_book:
-            self.app.address_book[dest_hash_raw]["timestamp"] = timestamp
-            self.app.save_address_book()
-            self.app.update_address_book()
-
-        self.app.on_announce(destination_hash, announced_identity, app_data)
-
-        # OPTIONAL: Add to app log
-        #self.app.write_debug_log(
-        #    f"[ANNOUNCE] {timestamp} - {display_name} ({dest_hash_display})"
-        #)
-
-
-class ServerDetailScreen(ModalScreen):
-    """Screen to display server details."""
-
-    def __init__(self, server_name, destination_hash, timestamp, on_connect, saved_in_address_book):
-        super().__init__()
-        self.server_name = server_name
-        self.destination_hash = destination_hash
-        self.timestamp = timestamp
-        self.on_connect = on_connect
-        self.saved_in_address_book = saved_in_address_book
-
-    def compose(self) -> ComposeResult:
-        yield Grid(
-            Label(
-                f"Server Name: {self.server_name}\nDestination Hash: {self.destination_hash}\nLast Heard: {self.timestamp}", 
-                id="server_details"
-            ),
-            Button("Connect", id="connect", variant="success", classes="button"),
-            Button(
-                "Remove from Address Book" if self.saved_in_address_book else "Save to Address Book",
-                id="toggle_address_book",
-                variant="primary",
-                classes="button",
-            ),
-            Button("Close", id="close", variant="default", classes="button"),
-            id="server_details_dialog",
-        )
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "connect":
-            asyncio.create_task(self.on_connect(self.destination_hash))
-            self.app.pop_screen()
-        elif event.button.id == "toggle_address_book":
-            self.app.pop_screen()
-            self.app.toggle_address_book(self.destination_hash, self.saved_in_address_book)
-        elif event.button.id == "close":
-            self.app.pop_screen()
-
-class HelpScreen(ModalScreen):
-    """Screen to display help information."""
-
-    def compose(self) -> ComposeResult:
-        help_text = (
-            "Welcome to the RetiBBS Client!\n\n"
-            "Available Key Bindings:\n"
-            "  q      - Quit the application\n"
-            "  ?      - Show this help screen\n\n"
-            "Use the arrow keys to navigate the interface.\n"
-        )
-        yield Grid(
-            Label(help_text, id="help_text"),
-            Button("Close", id="close_help", variant="default", classes="button"),
-            id="help_dialog",
-        )
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "close_help":
-            self.app.pop_screen()
 
 class RetiBBSClient(App):
     CSS_PATH = "app.tcss"
@@ -143,10 +49,29 @@ class RetiBBSClient(App):
         self.server_list_update_pending = False
         self.connection_status = "Not Connected"
         self.current_server_name = None
+        self.heartbeat_running = False
+        self.monitor_running = False
+        self.last_ping_time = None
+        self.last_pong_time = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         
+        main_screen = TabPane(title="Main", id="main")
+        main_screen.compose_add_child(
+            Log(id="main_log")
+        )
+
+        log_screen = TabPane(title="Log", id="debug")
+        log_screen.compose_add_child(
+            Log(id="debug_log")
+        )
+
+        screens = TabbedContent(id="screens", classes="screens")
+        screens.compose_add_child(main_screen)
+        screens.compose_add_child(log_screen)
+        screens.default_tab = "Main"
+
         server_tab = TabPane(title="Servers", id="servers")
         server_tab.compose_add_child(
             DataTable(id="server_list", classes="server-list", cursor_type="row")
@@ -164,18 +89,19 @@ class RetiBBSClient(App):
         
         yield Horizontal(
             Vertical(
-                Log(id="main_log"),
+                screens,
                 Static(self.connection_status, id="connection_status"),
+                Static("", id="connection_latency", classes="hidden"),
                 Input(placeholder="Enter command...", id="command_input"),
                 id="left_panel"
             ),
             Vertical(
                 tabs,
-                Log(id="debug_log", classes="debug-log"),
                 id="right_panel"
             ),
             id="main_body"
         )
+        
         yield Footer()
     
     def load_address_book(self):
@@ -183,10 +109,10 @@ class RetiBBSClient(App):
             try:
                 with open(ADDRESS_BOOK_FILE, "r") as file:
                     address_book = json.load(file)
-                    self._deferred_debug_log.append(f"[DEBUG] Address book loaded: {address_book}")
+                    #DEBUG: self._deferred_debug_log.append(f"[DEBUG] Address book loaded: {address_book}")
                     return address_book
             except Exception as e:
-                self._deferred_debug_log.append(f"[DEBUG] Error loading address book: {e}")
+                self._deferred_debug_log.append(f"[ERROR] Error loading address book: {e}")
         return {}
     
     def save_address_book(self):
@@ -236,7 +162,6 @@ class RetiBBSClient(App):
             self.write_debug_log(f"[INIT] Using identity file: {self.identity_file_path or 'default'}")
             self.client_identity = self.load_or_create_identity(self.identity_file_path)
             self.write_debug_log(f"[INIT] Client identity hash: {self.client_identity.hash.hex()}")
-
             self.register_announce_handler()
         except Exception as e:
             self.write_log(f"[INIT] Failed to initialize client: {e}")
@@ -262,8 +187,8 @@ class RetiBBSClient(App):
         if not address_book.columns:
             address_book.add_columns("Server Name", "Destination Hash")
 
-        server_list.visible = True
-        address_book.visible = True
+        #server_list.visible = True
+        #address_book.visible = True
 
         if hasattr(self, "_deferred_debug_log"):
             for message in self._deferred_debug_log:
@@ -301,7 +226,6 @@ class RetiBBSClient(App):
             self.write_log("Server hexhash not provided from the command line.\nSelect a server from your address book or please wait for an announce...")
     
     async def action_quit(self) -> None:
-        """Handle cleanup on quit."""
         try:
             if self.link and self.link.status == RNS.Link.ACTIVE:
                 self.write_debug_log("[QUIT] Closing active link to the server.")
@@ -316,23 +240,26 @@ class RetiBBSClient(App):
             self.exit()
 
     def action_show_help(self):
-        """Show the help screen."""
         self.push_screen(HelpScreen())
 
     def update_connection_status(self):
-        """Update the connection status line."""
         if self.link and self.link.status == RNS.Link.ACTIVE:
             indicator = Text("[✔] ", style="bold green")
             status = f"Connected to {self.current_server_name or 'Unknown Server'}"
             if hasattr(self, "current_board") and self.current_board:
                 status += f" | (Board: {self.current_board})"
         else:
-            indicator = Text("[✗] ", style="red")
+            indicator = Text("[✗] ", style="bold red")
             status = "Not Connected"
+            latency_widget = self.query_one("#connection_latency", Static)
+            latency_widget.visible = False
         status_widget = self.query_one("#connection_status", Static)
         status_widget.update(indicator + Text(status))
 
     async def connect_client(self, destination_hash=None):
+        self.last_ping_time = None
+        self.last_pong_time = None
+
         server_hexhash = destination_hash or self.server_hexhash
         if not server_hexhash:
             self.write_log("[CONNECT] Failed: No server hexhash provided.")
@@ -411,10 +338,81 @@ class RetiBBSClient(App):
             await asyncio.sleep(0.1)
     
     def on_link_established(self, link):
-        self.write_debug_log("[DEBUG] Link established!")
-        self.write_debug_log(f"[DEBUG] Link status: {link.status}")
+        #DEBUG: self.write_debug_log("[DEBUG] Link established!")
+        #DEBUG: self.write_debug_log(f"[DEBUG] Link status: {link.status}")
+        self.heartbeat_running = True
+        self.monitor_running = True
+        self.start_heartbeat()
+        self.start_connection_monitor()
+        latency_widget = self.query_one("#connection_latency", Static)
+        latency_widget.update(f"Connection Latency: [CALCULATING]")
+        latency_widget.visible = True
     
+    def start_heartbeat(self):
+        def heartbeat():
+            try:
+                #DEBUG: self.write_debug_log("[DEBUG] Starting heartbeat thread...")
+                while self.heartbeat_running:
+                    if self.link and self.link.status == RNS.Link.ACTIVE:
+                        self.send_ping()
+                    time.sleep(PING_INTERVAL)
+            except Exception as e:
+                self.write_debug_log(f"[ERROR] Error in heartbeat thread: {e}")
+        
+        self.write_debug_log("[INIT] Heartbeat thread started.")
+        threading.Thread(target=heartbeat, daemon=True).start()
+    
+    def start_connection_monitor(self):
+        def monitor():
+            try:
+                #DEBUG: self.write_debug_log("[DEBUG] Starting connection monitor thread...")
+                while self.monitor_running:
+                    self.check_pong_timeout()
+                    time.sleep(1)
+            except Exception as e:
+                self.write_debug_log(f"[ERROR] Error in connection monitor thread: {e}")
+        self.write_debug_log("[INIT] Connection monitor thread started.")
+        threading.Thread(target=monitor, daemon=True).start()
+    
+    def send_ping(self):
+        try:
+            self.last_ping_time = time.time()
+            packet = RNS.Packet(self.link, b"PING")
+            packet.send()
+            #DEBUG: self.write_debug_log("[DEBUG] Sent PING to server.")
+        except Exception as e:
+            self.write_log(f"[Client] Error sending PING: {e}")
+    
+    def check_pong_timeout(self):
+        if self.last_pong_time:
+            time_since_last_pong = time.time() - self.last_pong_time
+            #DEBUG: self.write_debug_log(f"[DEBUG] Time since last PONG: {time_since_last_pong:.3f} seconds")
+            if time_since_last_pong > PING_TIMEOUT:
+                self.write_log("[Client] No PONG received within timeout.")
+                self.teardown_connection()
+    
+    def teardown_connection(self):
+        self.heartbeat_running = False
+        self.monitor_running = False
+        self.last_ping_time = None
+        self.last_pong_time = None
+        latency_widget = self.query_one("#connection_latency", Static)
+        latency_widget.visible = False
+        if self.link:
+            self.link.teardown()
+            self.link = None
+        self.current_server_name = None
+        self.current_board = None
+        self.update_connection_status()
+        self.write_log("Connection lost.")
+
     def on_link_closed(self, link):
+        self.heartbeat_running = False
+        self.monitor_running = False
+        self.last_ping_time = None
+        self.last_pong_time = None
+        latency_widget = self.query_one("#connection_latency", Static)
+        latency_widget.visible = False
         self.link = None
         self.current_server_name = None
         self.current_board = None
@@ -438,22 +436,29 @@ class RetiBBSClient(App):
             self.write_log("Transfer concluded, but no data received!")
 
     def on_packet_received(self, message_bytes, packet):
-        try:
-            text = message_bytes.decode("utf-8", "ignore")
-            self.write_log(f"{text}")
+        if message_bytes == b"PONG":
+            self.last_pong_time = time.time()
+            round_trip_time = self.last_pong_time - self.last_ping_time
+            latency_widget = self.query_one("#connection_latency", Static)
+            latency_widget.update(f"Connection Latency: {round_trip_time:.3f} seconds")
+            return
+        else:
+            try:
+                text = message_bytes.decode("utf-8", "ignore")
+                self.write_log(f"{text}")
 
-            match = re.search(r"You have joined board '(.+)'", text)
-            if match:
-                board_name = match.group(1)
-                self.current_board = board_name
-            elif "You are not in any board." in text:
-                self.current_board = "None"
-            self.update_connection_status()
-        except UnicodeDecodeError as e:
-            self.write_log(f"[DEBUG] Error decoding packet data: {e}")
-            self.write_log(f"[DEBUG] Non-UTF-8 packet data: {message_bytes.data.hex()}")
-        except Exception as e:
-            self.write_log(f"[SERVER-PACKET] Error processing packet: {e}")
+                match = re.search(r"You have joined board '(.+)'", text)
+                if match:
+                    board_name = match.group(1)
+                    self.current_board = board_name
+                elif "You are not in any board." in text:
+                    self.current_board = "None"
+                self.update_connection_status()
+            except UnicodeDecodeError as e:
+                self.write_log(f"[ERROR] Error decoding packet data: {e}")
+                self.write_log(f"[ERROR] Non-UTF-8 packet data: {message_bytes.data.hex()}")
+            except Exception as e:
+                self.write_log(f"[SERVER-PACKET] Error processing packet: {e}")
 
     async def on_input_submitted(self, message: Input.Submitted):
         command = message.value.strip()
@@ -509,7 +514,7 @@ class RetiBBSClient(App):
             server_list.clear()
             for server in self.servers.values():
                 server_list.add_row(server["display_name"], server["hash"])
-            self.write_debug_log("[DEBUG] Server list updated successfully.")
+            #DEBUG: self.write_debug_log("[DEBUG] Server list updated successfully.")
         except Exception as e:
             self.server_list_update_pending = False
             self.write_debug_log(f"[ERROR] Error updating server list: {e}")
@@ -520,10 +525,10 @@ class RetiBBSClient(App):
             address_book.clear()
             for server in self.address_book.values():
                 address_book.add_row(server["display_name"], server["hash"])
-                self.write_debug_log(f"[DEBUG] Added to address book: {server['display_name']} - {server['hash']}")
-            self.write_debug_log("[DEBUG] Address book updated successfully.")
+                #DEBUG: self.write_debug_log(f"[DEBUG] Added to address book: {server['display_name']} - {server['hash']}")
+            #DEBUG: self.write_debug_log("[DEBUG] Address book updated successfully.")
         except Exception as e:
-            self.write_debug_log(f"[DEBUG] Error updating address book: {e}")
+            self.write_debug_log(f"[ERROR] Error updating address book: {e}")
     
     def toggle_address_book(self, destination_hash, currently_saved):
         if currently_saved:
@@ -546,7 +551,7 @@ class RetiBBSClient(App):
         try:
             triggering_table = event.control
             table_id = triggering_table.id
-            self.write_debug_log(f"[ACTION] Selected row in table: {table_id}, row key: {event.row_key}")
+            #DEBUG: self.write_debug_log(f"[ACTION] Selected row in table: {table_id}, row key: {event.row_key}")
 
             if table_id == "server_list":
                 row_data = triggering_table.get_row(event.row_key)
