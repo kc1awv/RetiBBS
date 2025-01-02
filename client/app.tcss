@@ -16,6 +16,10 @@ Screen {
     color: white;
 }
 
+#connection_status {
+    padding: 0 1;
+}
+
 .address_book {
     height: 1fr;
 }

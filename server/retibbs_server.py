@@ -195,9 +195,9 @@ def remote_identified(link, identity):
     welcome_str = f"Welcome, {get_user_display(identity_hash_hex)} to the {server_name} RetiBBS Server!\n"
 
     if current_board:
-        reply = f"{welcome_str}You have joined board '{current_board}'\n\n"
+        reply = f"{welcome_str}You have joined board '{current_board}'"
     else:
-        reply = f"{welcome_str}You have not joined any board.\nUse the lb (LISTBOARDS) command to find a board to join.\n\n"
+        reply = f"{welcome_str}You have not joined any board.\nUse the lb (LISTBOARDS) command to find a board to join."
 
     send_link_reply(link, reply)
 
@@ -245,21 +245,21 @@ def server_packet_received(message_bytes, packet):
             "  b  | board <boardname>        - Switch to a board (so you can post/list by default)\n"
             "  p  | post <text>              - Post a message to your current board\n"
             "  l  | list [boardname]         - List messages in 'boardname' or your current board\n"
-            "  lo | logout                   - Log out\n\n"
+            "  lo | logout                   - Log out"
         )
         if user_info.get("is_admin", False):
             reply += (
-                "Admin Commands:\n"
+                "\nAdmin Commands:\n"
                 "  cb | createboard <name>       - Create a new board\n"
                 "  db | deleteboard <boardname>  - Delete a board\n"
-                "  a  | admin <user_hash>        - Assign admin rights to a user\n"
+                "  a  | admin <user_hash>        - Assign admin rights to a user"
         )
         send_resource_reply(packet.link, reply)
     
     elif cmd in ["h", "hello"]:
-        reply = f"Hello, {user_display_name}. You are {'AUTHORIZED' if is_authorized else 'UNAUTHORIZED'}.\n"
+        reply = f"Hello, {user_display_name}. You are {'AUTHORIZED' if is_authorized else 'UNAUTHORIZED'}."
         if user_info.get("is_admin", False):
-            reply += "You have ADMIN rights.\n"
+            reply += "\nYou have ADMIN rights."
         send_link_reply(packet.link, reply)
     
     elif cmd in ["lo", "logout"]:
@@ -269,20 +269,20 @@ def server_packet_received(message_bytes, packet):
 
     elif cmd in ["n", "name"]:
         if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED\n")
+            send_link_reply(packet.link, "UNAUTHORIZED")
             return
 
         proposed_name = remainder.strip()
         if not proposed_name:
-            send_link_reply(packet.link, "NAME command requires a non-empty name.\n")
+            send_link_reply(packet.link, "NAME command requires a non-empty name.")
             return
 
         if is_name_taken(proposed_name, own_hash_hex=identity_hash_hex):
-            send_link_reply(packet.link, f"ERROR: The name '{proposed_name}' is already taken.\n")
+            send_link_reply(packet.link, f"ERROR: The name '{proposed_name}' is already taken.")
             return
 
         authorized_users[identity_hash_hex]["name"] = proposed_name
-        send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.\n")
+        send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
 
         if auth_file_path:
             save_authorized_users(auth_file_path, authorized_users)
@@ -292,33 +292,33 @@ def server_packet_received(message_bytes, packet):
 
     elif cmd in ["b", "board"]:
         if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED\n")
+            send_link_reply(packet.link, "UNAUTHORIZED")
             return
 
         board_name = remainder.strip()
         if not board_name:
-            send_link_reply(packet.link, "Usage: BOARD <board_name>\n")
+            send_link_reply(packet.link, "Usage: BOARD <board_name>")
             return
 
         handle_join_board(packet, identity_hash_hex, board_name)
 
     elif cmd in ["p", "post"]:
         if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED\n")
+            send_link_reply(packet.link, "UNAUTHORIZED")
             return
 
         post_text = remainder.strip()
         if not post_text:
-            send_link_reply(packet.link, "Usage: POST <text>\n")
+            send_link_reply(packet.link, "Usage: POST <text>")
             return
 
         board_name = user_info.get("current_board")
         if not board_name:
-            send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.\n")
+            send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
             return
 
         boards_mgr.post_message(board_name, user_display_name, post_text)
-        reply = f"Posted to board '{board_name}': {post_text}\n"
+        reply = f"Posted to board '{board_name}': {post_text}"
         send_link_reply(packet.link, reply)
 
     elif cmd in ["l", "list"]:
@@ -328,81 +328,81 @@ def server_packet_received(message_bytes, packet):
         else:
             cur_board = user_info.get("current_board")
             if not cur_board:
-                send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.\n")
+                send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
             else:
                 handle_list_board(packet, cur_board)
 
     elif cmd in ["cb", "createboard"]:
         if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED\n")
+            send_link_reply(packet.link, "UNAUTHORIZED")
             return
         
         user_info = authorized_users.get(identity_hash_hex, {})
         if not user_info.get("is_admin", False):
-            send_link_reply(packet.link, "ERROR: Only admins can create boards.\n")
+            send_link_reply(packet.link, "ERROR: Only admins can create boards.")
             return
 
         board_name = remainder.strip()
         if not board_name:
-            send_link_reply(packet.link, "Usage: CREATEBOARD <board_name>\n")
+            send_link_reply(packet.link, "Usage: CREATEBOARD <board_name>")
             return
         
         if not is_valid_board_name(board_name):
-            send_link_reply(packet.link, "ERROR: Invalid board name. Must be alphanumeric and 3-20 characters long.\n")
+            send_link_reply(packet.link, "ERROR: Invalid board name. Must be alphanumeric and 3-20 characters long.")
             return
 
         boards_mgr.create_board(board_name)
-        send_link_reply(packet.link, f"Board '{board_name}' is ready.\n")
+        send_link_reply(packet.link, f"Board '{board_name}' is ready.")
 
     elif cmd in ["db", "deleteboard"]:
         if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED\n")
+            send_link_reply(packet.link, "UNAUTHORIZED")
             return
         
         user_info = authorized_users.get(identity_hash_hex, {})
         if not user_info.get("is_admin", False):
-            send_link_reply(packet.link, "ERROR: Only admins can delete boards.\n")
+            send_link_reply(packet.link, "ERROR: Only admins can delete boards.")
             return
 
         board_name = remainder.strip()
         if not board_name:
-            send_link_reply(packet.link, "Usage: DELETEBOARD <board_name>\n")
+            send_link_reply(packet.link, "Usage: DELETEBOARD <board_name>")
             return
 
         success = boards_mgr.delete_board(board_name)
         if success:
-            reply = f"Board '{board_name}' has been deleted.\n"
+            reply = f"Board '{board_name}' has been deleted."
         else:
-            reply = f"Board '{board_name}' does not exist.\n"
+            reply = f"Board '{board_name}' does not exist."
         send_link_reply(packet.link, reply)
 
     elif cmd in ["a", "admin"]:
         if not is_authorized:
-            send_link_reply(packet.link, "UNAUTHORIZED\n")
+            send_link_reply(packet.link, "UNAUTHORIZED")
             return
 
         user_info = authorized_users.get(identity_hash_hex, {})
         if not user_info.get("is_admin", False):
-            send_link_reply(packet.link, "ERROR: Only admins can assign admin rights.\n")
+            send_link_reply(packet.link, "ERROR: Only admins can assign admin rights.")
             return
 
         target_hash = remainder.strip()
         if not target_hash:
-            send_link_reply(packet.link, "Usage: ADMIN <user_hash>\n")
+            send_link_reply(packet.link, "Usage: ADMIN <user_hash>")
             return
 
         if target_hash not in authorized_users:
-            send_link_reply(packet.link, "ERROR: User does not exist.\n")
+            send_link_reply(packet.link, "ERROR: User does not exist.")
             return
 
         authorized_users[target_hash]["is_admin"] = True
-        send_link_reply(packet.link, f"User {get_user_display(target_hash)} has been granted admin rights.\n")
+        send_link_reply(packet.link, f"User {get_user_display(target_hash)} has been granted admin rights.")
 
         if auth_file_path:
             save_authorized_users(auth_file_path, authorized_users)
 
     else:
-        send_link_reply(packet.link, "UNKNOWN COMMAND\n")
+        send_link_reply(packet.link, "UNKNOWN COMMAND")
 
 def is_valid_board_name(board_name):
     """
@@ -416,17 +416,17 @@ def handle_join_board(packet, user_hash_hex, board_name):
     current = user_info.get("current_board")
 
     if current == board_name:
-        reply = f"You are already in board '{board_name}'\n"
+        reply = f"You are already in board '{board_name}'"
     else:
         user_info["current_board"] = board_name
-        reply = f"You have joined board '{board_name}'\n"
+        reply = f"You have joined board '{board_name}'"
 
     send_link_reply(packet.link, reply)
 
 def handle_list_boards(packet):
     names = boards_mgr.list_boards()
     if not names:
-        reply = "No boards exist.\n"
+        reply = "No boards exist."
     else:
         reply = "All Boards:\n" + "\n".join(names) + "\n"
     send_resource_reply(packet.link, reply)
@@ -434,7 +434,7 @@ def handle_list_boards(packet):
 def handle_list_board(packet, board_name):
     posts = boards_mgr.list_messages(board_name)
     if not posts:
-        reply = f"No messages on board '{board_name}'\n"
+        reply = f"No messages on board '{board_name}'"
     else:
         lines = []
         for m in posts:
