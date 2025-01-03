@@ -61,20 +61,20 @@ python retibbs_textual.py [OPTIONS]
 
 ### Once connected:
 ```
+Main Menu:
+
   ?  | help               - Show help text and available commands
   h  | hello              - Check authorization status
   n  | name <name>        - Set your display name
-  lb | listboards         - List all available boards
-  b  | board <boardname>  - Switch to a specific board
-  p  | post <text>        - Post a message to current board
-  l  | list [boardname]   - List messages in a board
+  b  | boards             - Switch to message boards area
   lo | logout             - Log out from the system
 
 ### Admin Commands
-  cb | createboard <name>       - Create a new board
-  db | deleteboard <boardname>  - Delete an existing board
-  a  | admin <user_hash>        - Grant admin rights to a user
+  lu | listusers          - Create a new board
+  a  | admin <user_hash>  - Grant admin rights to a user
 ```
+
+Each area has its own set of commands. Use `?` or `help` to get a list of commands for the area you are in.
 
 ## Configuration
 
