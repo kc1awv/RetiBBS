@@ -25,3 +25,23 @@ class ReplyHandler:
             RNS.log(f"[ReplyHandler] Sent resource reply (length={len(data)} bytes)", RNS.LOG_DEBUG)
         except Exception as e:
             RNS.log(f"[ReplyHandler] Error sending resource reply: {e}", RNS.LOG_ERROR)
+
+    @staticmethod
+    def send_area_update(link, area):
+        try:
+            control_packet = f"CTRL AREA {area}".encode("utf-8")
+            packet = RNS.Packet(link, control_packet)
+            packet.send()
+            RNS.log(f"[ReplyHandler] Sent area update: {area}", RNS.LOG_DEBUG)
+        except Exception as e:
+            RNS.log(f"[ReplyHandler] Error sending area update: {e}", RNS.LOG_ERROR)
+
+    @staticmethod
+    def send_board_update(link, board_name):
+        try:
+            control_packet = f"CTRL BOARD {board_name}".encode("utf-8")
+            packet = RNS.Packet(link, control_packet)
+            packet.send()
+            RNS.log(f"[ReplyHandler] Sent board update: {board_name}", RNS.LOG_DEBUG)
+        except Exception as e:
+            RNS.log(f"[ReplyHandler] Error sending board update: {e}", RNS.LOG_ERROR)
