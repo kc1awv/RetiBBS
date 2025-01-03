@@ -122,11 +122,9 @@ class RetiBBSServer:
         user_name = user.get("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
         welcome_str = f"Welcome, {user_name} to the {server_name} RetiBBS Server!\n"
 
-        if current_board:
-            reply = f"{welcome_str}You have joined board '{current_board}'"
-        else:
-            reply = f"{welcome_str}You have not joined any board.\nUse the lb (listboards) command to find a board to join.\n? (help) for help."
+        reply = f"{welcome_str}You are at the main menu. Use '?' for help."
 
+        self.reply_handler.send_area_update(link, "Main Menu")
         self.reply_handler.send_link_reply(link, reply)
 
     def server_packet_received(self, message_bytes, packet):

@@ -90,6 +90,7 @@ class BoardsManager:
             self.reply_handler.send_resource_reply(packet.link, reply)
         elif cmd in ["b", "back"]:
             self.users_mgr.update_user(user_hash, current_area="main_menu")
+            self.reply_handler.send_area_update(packet.link, "Main Menu")
             self.reply_handler.send_link_reply(packet.link, "Returning to main menu.")
         elif cmd in ["lb", "listboards"]:
             self.handle_list_boards(packet)
@@ -170,6 +171,7 @@ class BoardsManager:
             self.users_mgr.update_user(user_hash, current_board=board_name)
             reply = f"You have joined board '{board_name}'"
 
+        self.reply_handler.send_board_update(packet.link, board_name)
         self.reply_handler.send_link_reply(packet.link, reply)
 
     def handle_list_messages(self, packet, board_name):

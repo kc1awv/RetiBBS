@@ -246,8 +246,10 @@ class RetiBBSClient(App):
         if self.link and self.link.status == RNS.Link.ACTIVE:
             indicator = Text("[✔] ", style="bold green")
             status = f"Connected to {self.current_server_name or 'Unknown Server'}"
-            if hasattr(self, "current_board") and self.current_board:
-                status += f" | (Board: {self.current_board})"
+            if hasattr(self, "current_area") and self.current_area:
+                status += f" | {self.current_area}"
+                if hasattr(self, "current_board") and self.current_board:
+                    status += f" | Board: {self.current_board}"
         else:
             indicator = Text("[✗] ", style="bold red")
             status = "Not Connected"
@@ -345,7 +347,7 @@ class RetiBBSClient(App):
         self.start_heartbeat()
         self.start_connection_monitor()
         latency_widget = self.query_one("#connection_latency", Static)
-        latency_widget.update(f"Connection Latency: [CALCULATING]")
+        latency_widget.update(f"Connection Latency (RTT): [CALCULATING]")
         latency_widget.visible = True
     
     def start_heartbeat(self):
@@ -440,8 +442,28 @@ class RetiBBSClient(App):
             self.last_pong_time = time.time()
             round_trip_time = self.last_pong_time - self.last_ping_time
             latency_widget = self.query_one("#connection_latency", Static)
-            latency_widget.update(f"Connection Latency: {round_trip_time:.3f} seconds")
+            latency_widget.update(f"Connection Latency (RTT): {round_trip_time:.3f} seconds")
             return
+        elif message_bytes.startswith(b"CTRL AREA"):
+            try:
+                decoded_message = message_bytes.decode("utf-8")
+                area_name = decoded_message[len("CTRL AREA "):].strip()
+                self.current_area = area_name
+                self.write_debug_log(f"[INFO] Area update: {area_name}")
+                if self.current_area != "Message Boards":
+                    self.current_board = None
+                self.update_connection_status()
+            except Exception as e:
+                self.write_log(f"[SERVER-PACKET] Error processing area update: {e}")
+        elif message_bytes.startswith(b"CTRL BOARD"):
+            try:
+                decoded_message = message_bytes.decode("utf-8")
+                board_name = decoded_message[len("CTRL BOARD "):].strip()
+                self.current_board = board_name
+                self.write_debug_log(f"[INFO] Board update: {board_name}")
+                self.update_connection_status()
+            except Exception as e:
+                self.write_log(f"[SERVER-PACKET] Error processing board update: {e}")
         else:
             try:
                 text = message_bytes.decode("utf-8", "ignore")
