@@ -1,395 +1,174 @@
 #!/usr/bin/env python3
 import argparse
 import os
-import time
 import json
 import sys
-import threading
+
 import RNS
 
-from announcer import AutomaticAnnouncer
-from boards import BoardsManager
-from users import UsersManager
+from automatic_announcer import AutomaticAnnouncer
+from boards_manager import BoardsManager
+from identity_manager import IdentityManager
+from main_menu import MainMenuHandler
+from reply_handler import ReplyHandler
+from users_manager import UsersManager
 
-APP_NAME = "retibbs"
-SERVICE_NAME = "bbs"
-HEARTBEAT_INTERVAL = 10
-CONNECTION_TIMEOUT = 30
+class RetiBBSServer:
+    def __init__(self, configpath, identity_file, server_name, announce_interval):
+        self.configpath = configpath
+        self.identity_file = identity_file
+        self.server_name = server_name
+        self.announce_interval = announce_interval
+        self.users_mgr = UsersManager()
+        self.reply_handler = ReplyHandler()
+        self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler)
+        self.boards_mgr = BoardsManager(self.users_mgr, self.reply_handler)
+        self.latest_client_link = None
+        self.server_identity = None
+        self.server_destination = None
+        self.announcer = None
 
-users_mgr = UsersManager()
-boards_mgr = BoardsManager()
-latest_client_link = None
-announce_interval = None
-active_links = set()
-client_last_active = {}
+        self.server_setup()
 
-def load_or_create_identity(identity_path):
-    """
-    Loads (or creates) the server's own private key Identity.
-    """
-    if os.path.isfile(identity_path):
-        server_identity = RNS.Identity.from_file(identity_path)
-        RNS.log(f"[Server] Loaded server Identity from {identity_path}")
-    else:
-        server_identity = RNS.Identity()
-        server_identity.to_file(identity_path)
-        RNS.log(f"[Server] Created new server Identity and saved to {identity_path}")
-    return server_identity
+    def server_setup(self):
+        RNS.Reticulum(self.configpath)
+        identity_manager = IdentityManager(self.identity_file)
+        self.server_identity = identity_manager.load_or_create_identity()
 
-def server_setup(configpath, identity_file, server_name, announce_interval):
-    global users_mgr, boards_mgr
+        self.server_destination = RNS.Destination(
+            self.server_identity,
+            RNS.Destination.IN,
+            RNS.Destination.SINGLE,
+            "retibbs",
+            "bbs"
+        )
+        self.server_destination.set_link_established_callback(self.client_connected)
 
-    reticulum = RNS.Reticulum(configpath)
-    server_identity = load_or_create_identity(identity_file)
-    
-    server_destination = RNS.Destination(
-        server_identity,
-        RNS.Destination.IN,
-        RNS.Destination.SINGLE,
-        APP_NAME,
-        SERVICE_NAME
-    )
-    server_destination.set_link_established_callback(client_connected)
+        RNS.log(f"[Server] BBS Server running. Identity hash: {RNS.prettyhexrep(self.server_destination.hash)}", RNS.LOG_INFO)
 
-    RNS.log(f"[Server] BBS Server running. Identity hash: {RNS.prettyhexrep(server_destination.hash)}")
-    RNS.log("[Server] Press Enter to send an ANNOUNCE. Ctrl-C to quit.")
+        if self.announce_interval > 0:
+            self.announcer = AutomaticAnnouncer(
+                self.server_destination,
+                self.announce_interval,
+                self.server_name
+            )
+            self.announcer.start()
+            RNS.log(f"[Server] Automatic announce set to every {announce_interval} seconds.", RNS.LOG_INFO)
 
-    if announce_interval > 0:
-        announcer = AutomaticAnnouncer(server_destination, announce_interval, server_name)
-        announcer.start()
-        RNS.log(f"[Server] Automatic announce set to every {announce_interval} seconds.")
-
-    try:
+    def run(self):
         while True:
-            input()
-            announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
-            server_destination.announce(app_data=announce_data)
-            RNS.log("[Server] Sent announce from " + RNS.prettyhexrep(server_destination.hash))
-    except KeyboardInterrupt:
-        RNS.log("[Server] Shutdown initiated. Stopping automatic announcer...")
-        if announce_interval > 0:
-            announcer.stop()
-            announcer.join()
-        RNS.log("[Server] Shutting down Reticulum...")
-        RNS.Reticulum.exit_handler()
-        RNS.log("[Server] Server stopped gracefully.")
-        sys.exit(0)
+            try:
+                RNS.log("[Server] Waiting for incoming connections... Press Enter to send an ANNOUNCE.", RNS.LOG_INFO)
+                input()
+                RNS.log("[Server] Sending manual announce...", RNS.LOG_INFO)
+                self.send_announce()
+            except KeyboardInterrupt:
+                RNS.log("[Server] Keyboard interrupt received, shutting down...", RNS.LOG_INFO)
+                self.shutdown()
+                break
 
-def start_automatic_announce(server_destination):
-    """
-    Starts a timer to send automatic announces at the configured interval.
-    """
-    def send_announce():
-        announce_data = json.dumps({"server_name": server_name}).encode("utf-8")
-        server_destination.announce(app_data=announce_data)
-        RNS.log("[Server] Sent automatic announce")
+    def send_announce(self):
+        announce_data = json.dumps({"server_name": self.server_name}).encode("utf-8")
+        self.server_destination.announce(app_data=announce_data)
+        RNS.log("[Server] Sent announce from " + RNS.prettyhexrep(self.server_destination.hash), RNS.LOG_DEBUG)
 
-        if announce_interval > 0:
-            threading.Timer(announce_interval, send_announce).start()
-
-    send_announce()
-
-def client_connected(link):
-    global latest_client_link, active_links
-
-    active_links.add(link)
-    client_last_active[link.destination.hash.hex()] = time.time()
-
-    RNS.log("[Server] Client link established!")
-
-    link.set_link_closed_callback(client_disconnected)
-    link.set_packet_callback(server_packet_received)
-    link.set_remote_identified_callback(remote_identified)
-    latest_client_link = link
-
-    # FUTURE: automatically accept inbound resources from the client:
-    # link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
-    # link.set_resource_started_callback(resource_started_callback)
-    # link.set_resource_concluded_callback(resource_concluded_callback)
-
-def client_disconnected(link):
-    global active_links, client_last_active
-    identity_hash_hex = link.destination.hash.hex()
-    active_links.discard(link)
-    client_last_active.pop(identity_hash_hex, None)
-    RNS.log("[Server] Client disconnected.")
-
-def remote_identified(link, identity):
-    identity_hash_hex = identity.hash.hex()
-    display_str = RNS.prettyhexrep(identity.hash)
-
-    RNS.log(f"[Server] Remote identified as {display_str}")
-
-    if not users_mgr.get_user(identity_hash_hex):
-        users_mgr.add_user(identity_hash_hex)
-        RNS.log(f"[Server] Added new user {display_str} to authorized list.")
-
-    current_board = users_mgr.get_user(identity_hash_hex).get("current_board")
-    welcome_str = f"Welcome, {get_user_display(identity_hash_hex)} to the {server_name} RetiBBS Server!\n"
-
-    if current_board:
-        reply = f"{welcome_str}You have joined board '{current_board}'"
-    else:
-        reply = f"{welcome_str}You have not joined any board.\nUse the lb (listboards) command to find a board to join.\n? (help) for help."
-
-    send_link_reply(link, reply)
-
-def get_user_display(hash_hex):
-    user = users_mgr.get_user(hash_hex)
-    if user and user["name"]:
-        return user["name"]
-    return RNS.prettyhexrep(bytes.fromhex(hash_hex))
-
-def is_name_taken(name, own_hash_hex=None):
-    users = users_mgr.list_users()
-    for user in users:
-        if user["hash_hex"] != own_hash_hex and user["name"] == name:
-            return True
-    return False
-
-def server_packet_received(message_bytes, packet):
-    global client_last_active
-
-    remote_identity = packet.link.get_remote_identity()
-    if not remote_identity:
-        RNS.log("[Server] Received data from an unidentified peer.")
-        return
-
-    identity_hash_hex = remote_identity.hash.hex()
-    client_last_active[identity_hash_hex] = time.time()
-    user_info = users_mgr.get_user(identity_hash_hex)
-    user_display_name = get_user_display(identity_hash_hex)
-
-    if message_bytes == b"PING":
+    def shutdown(self):
+        RNS.log("[Server] Shutdown initiated.", RNS.LOG_INFO)
+        if self.announcer:
+            try:
+                RNS.log("[Server] Stopping automatic announcer...", RNS.LOG_INFO)
+                self.announcer.stop()
+                self.announcer.join()
+                RNS.log("[Server] Automatic announcer stopped.", RNS.LOG_INFO)
+            except Exception as e:
+                RNS.log(f"[Server] Error stopping automatic announcer: {e}", RNS.LOG_ERROR)
+        RNS.log("[Server] Shutting down Reticulum...", RNS.LOG_INFO)
         try:
-            reply_packet = RNS.Packet(packet.link, b"PONG")
-            reply_packet.send()
-            RNS.log(f"[Server] Received PING from {identity_hash_hex}, sent PONG", RNS.LOG_DEBUG)
+            RNS.Reticulum.exit_handler()
         except Exception as e:
-            RNS.log(f"[Server] Error sending PONG: {e}", RNS.LOG_ERROR)
-        return
-    else:
-        try:
-            msg_str = message_bytes.decode("utf-8").strip()
-        except:
-            RNS.log("[Server] Error decoding message!")
-            return
+            RNS.log(f"[Server] Error during Reticulum shutdown: {e}", RNS.LOG_ERROR)
+        RNS.log("[Server] Logs flushed, exiting...", RNS.LOG_INFO)
+        sys.stdout.flush()
+        sys.stderr.flush()
 
-        RNS.log(f"[Server] Received: {msg_str} from {user_display_name}")
+    def client_connected(self, link):
+        RNS.log("[Server] Client link established!", RNS.LOG_DEBUG)
 
-        tokens = msg_str.split(None, 1)
-        if not tokens:
-            send_link_reply(packet.link, "UNKNOWN COMMAND\n")
-            return
+        link.set_link_closed_callback(self.client_disconnected)
+        link.set_packet_callback(self.server_packet_received)
+        link.set_remote_identified_callback(self.remote_identified)
+        self.latest_client_link = link
 
-        cmd = tokens[0].lower()
-        remainder = tokens[1] if len(tokens) > 1 else ""
+        # FUTURE: automatically accept inbound resources from the client:
+        # link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
+        # link.set_resource_started_callback(resource_started_callback)
+        # link.set_resource_concluded_callback(resource_concluded_callback)
 
-        if cmd in ["?", "help"]:
-            reply = (
-                "Available Commands:\n"
-                "  ?  | help                     - Show this help text\n"
-                "  h  | hello                    - Check authorization\n"
-                "  n  | name <name>              - Set display name\n"
-                "  lb | listboards               - List all boards\n"
-                "  b  | board <boardname>        - Switch to a board (so you can post/list by default)\n"
-                "  p  | post <text>              - Post a message to your current board\n"
-                "  l  | list [boardname]         - List messages in 'boardname' or your current board\n"
-                "  lo | logout                   - Log out"
-            )
-            if user_info.get("is_admin", False):
-                reply += (
-                    "\n\nAdmin Commands:\n"
-                    "  cb | createboard <name>       - Create a new board\n"
-                    "  db | deleteboard <boardname>  - Delete a board\n"
-                    "  a  | admin <user_hash>        - Assign admin rights to a user"
-            )
-            send_resource_reply(packet.link, reply)
+    def client_disconnected(self, link):
+        RNS.log("[Server] Client disconnected.", RNS.LOG_DEBUG)
 
-        elif cmd in ["h", "hello"]:
-            reply = f"Hello, {user_display_name}."
-            if user_info.get("is_admin", False):
-                reply += "\nYou have ADMIN rights."
-            send_link_reply(packet.link, reply)
+    def remote_identified(self, link, identity):
+        identity_hash_hex = identity.hash.hex()
+        display_str = RNS.prettyhexrep(identity.hash)
 
-        elif cmd in ["lo", "logout"]:
-            RNS.log(f"[Server] Client {user_display_name} has requested to logout.")
-            send_link_reply(packet.link, "You have been logged out. Goodbye!\n")
-            packet.link.teardown()
+        RNS.log(f"[Server] Remote identified as {display_str}", RNS.LOG_DEBUG)
 
-        elif cmd in ["n", "name"]:
-            proposed_name = remainder.strip()
-            if not proposed_name:
-                send_link_reply(packet.link, "NAME command requires a non-empty name.")
-                return
+        if not self.users_mgr.get_user(identity_hash_hex):
+            self.users_mgr.add_user(identity_hash_hex)
+            RNS.log(f"[Server] Added new user {display_str} to authorized list.", RNS.LOG_DEBUG)
 
-            if is_name_taken(proposed_name, own_hash_hex=identity_hash_hex):
-                send_link_reply(packet.link, f"ERROR: The name '{proposed_name}' is already taken.")
-                return
+        user = self.users_mgr.get_user(identity_hash_hex)
+        current_board = user.get("current_board", None)
+        user_name = user.get("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
+        welcome_str = f"Welcome, {user_name} to the {server_name} RetiBBS Server!\n"
 
-            users_mgr.update_user(identity_hash_hex, name=proposed_name)
-            send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
-
-        elif cmd in ["lb", "listboards"]:
-            handle_list_boards(packet)
-
-        elif cmd in ["b", "board"]:
-            board_name = remainder.strip()
-            if not board_name:
-                send_link_reply(packet.link, "Usage: BOARD <board_name>")
-                return
-
-            handle_join_board(packet, identity_hash_hex, board_name)
-
-        elif cmd in ["p", "post"]:
-            post_text = remainder.strip()
-            if not post_text:
-                send_link_reply(packet.link, "Usage: POST <text>")
-                return
-
-            board_name = user_info.get("current_board")
-            if not board_name:
-                send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
-                return
-
-            boards_mgr.post_message(board_name, user_display_name, post_text)
-            reply = f"Posted to board '{board_name}': {post_text}"
-            send_link_reply(packet.link, reply)
-
-        elif cmd in ["l", "list"]:
-            board_name = remainder.strip()
-            if board_name:
-                handle_list_board(packet, board_name)
-            else:
-                cur_board = user_info.get("current_board")
-                if not cur_board:
-                    send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
-                else:
-                    handle_list_board(packet, cur_board)
-
-        elif cmd in ["cb", "createboard"]:
-            user_info = users_mgr.get_user(identity_hash_hex)
-            if not user_info.get("is_admin", False):
-                send_link_reply(packet.link, "ERROR: Only admins can create boards.")
-                return
-
-            board_name = remainder.strip()
-            if not board_name:
-                send_link_reply(packet.link, "Usage: CREATEBOARD <board_name>")
-                return
-
-            if not is_valid_board_name(board_name):
-                send_link_reply(packet.link, "ERROR: Invalid board name. Must be alphanumeric and 3-20 characters long.")
-                return
-
-            boards_mgr.create_board(board_name)
-            send_link_reply(packet.link, f"Board '{board_name}' is ready.")
-
-        elif cmd in ["db", "deleteboard"]:
-            user_info = users_mgr.get_user(identity_hash_hex)
-            if not user_info.get("is_admin", False):
-                send_link_reply(packet.link, "ERROR: Only admins can delete boards.")
-                return
-
-            board_name = remainder.strip()
-            if not board_name:
-                send_link_reply(packet.link, "Usage: DELETEBOARD <board_name>")
-                return
-
-            success = boards_mgr.delete_board(board_name)
-            if success:
-                reply = f"Board '{board_name}' has been deleted."
-            else:
-                reply = f"Board '{board_name}' does not exist."
-            send_link_reply(packet.link, reply)
-
-        elif cmd in ["a", "admin"]:
-            user_info = users_mgr.get_user(identity_hash_hex)
-            if not user_info.get("is_admin", False):
-                send_link_reply(packet.link, "ERROR: Only admins can assign admin rights.")
-                return
-
-            target_hash = remainder.strip()
-            if not target_hash:
-                send_link_reply(packet.link, "Usage: ADMIN <user_hash>")
-                return
-
-            target_user = users_mgr.get_user(target_hash)
-            if not target_user:
-                send_link_reply(packet.link, "ERROR: User does not exist.")
-                return
-
-            users_mgr.update_user(target_hash, is_admin=True)
-            send_link_reply(packet.link, f"User {get_user_display(target_hash)} has been granted admin rights.")
-
+        if current_board:
+            reply = f"{welcome_str}You have joined board '{current_board}'"
         else:
-            send_link_reply(packet.link, "UNKNOWN COMMAND")
+            reply = f"{welcome_str}You have not joined any board.\nUse the lb (listboards) command to find a board to join.\n? (help) for help."
 
-def is_valid_board_name(board_name):
-    """
-    Validates the board name.
-    For example, board names must be alphanumeric and between 3-20 characters.
-    """
-    return board_name.isalnum() and 3 <= len(board_name) <= 20
+        self.reply_handler.send_link_reply(link, reply)
 
-def handle_join_board(packet, user_hash_hex, board_name):
-    user_info = users_mgr.get_user(user_hash_hex)
-    current = user_info.get("current_board")
+    def server_packet_received(self, message_bytes, packet):
+        remote_identity = packet.link.get_remote_identity()
+        if not remote_identity:
+            RNS.log("[Server] Received data from an unidentified peer.", RNS.LOG_WARNING)
+            return
 
-    if current == board_name:
-        reply = f"You are already in board '{board_name}'"
-    else:
-        users_mgr.update_user(user_hash_hex, current_board=board_name)
-        reply = f"You have joined board '{board_name}'"
+        identity_hash_hex = remote_identity.hash.hex()
 
-    send_link_reply(packet.link, reply)
+        user = self.users_mgr.get_user(identity_hash_hex)
+        if not user:
+            RNS.log("[Server] Received data from an unknown user.", RNS.LOG_WARNING)
+            return
 
-def handle_list_boards(packet):
-    names = boards_mgr.list_boards()
-    if not names:
-        reply = "No boards exist."
-    else:
-        reply = "All Boards:\n" + "\n".join(names) + "\n"
-    send_resource_reply(packet.link, reply)
+        user_area = user.get("current_area", "main_menu")
+        user_display_name = user.get("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
 
-def handle_list_board(packet, board_name):
-    posts = boards_mgr.list_messages(board_name)
-    if not posts:
-        reply = f"No messages on board '{board_name}'"
-    else:
-        lines = []
-        for m in posts:
-            t_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(m["timestamp"]))
-            lines.append(f"[{t_str} {m['author']}] {m['content']}")
-        reply = "\n".join(lines) + "\n"
-    send_resource_reply(packet.link, reply)
+        if message_bytes == b"PING":
+            try:
+                reply_packet = RNS.Packet(packet.link, b"PONG")
+                reply_packet.send()
+                RNS.log(f"[Server] Received PING from {identity_hash_hex}, sent PONG", RNS.LOG_DEBUG)
+            except Exception as e:
+                RNS.log(f"[Server] Error sending PONG: {e}", RNS.LOG_ERROR)
+            return
+        else:
+            try:
+                msg_str = message_bytes.decode("utf-8").strip()
+            except:
+                RNS.log("[Server] Error decoding message!", RNS.LOG_ERROR)
+                return
 
-def send_link_reply(link, text):
-    data = text.encode("utf-8")
+            RNS.log(f"[Server] Received: {msg_str} from {user_display_name}", RNS.LOG_DEBUG)
+            RNS.log(f"[Server] User area: {user_area}", RNS.LOG_DEBUG)
 
-    if link.destination.hash == RNS.Transport.identity.hash:
-        RNS.log(f"[ERROR] Attempted to send packet to self. Destination hash: {RNS.prettyhexrep(link.destination.hash)}", RNS.LOG_ERROR)
-        return
-
-    packet = RNS.Packet(link, data)
-    packet.send()
-
-def packet_delivered(receipt):
-    RNS.log(f"[Server] Packet delivered to {receipt.destination}")
-
-def packet_timeout(receipt):
-    RNS.log(f"[Server] Packet to {receipt.destination} timed out", RNS.LOG_ERROR)
-    link = receipt.destination
-    link.teardown()
-
-def send_resource_reply(link, text):
-    """
-    Instead of sending a normal packet, we create an RNS.Resource.
-    This allows arbitrarily large 'text' to be transferred reliably.
-    The client must be ready to accept resources.
-    """
-    data = text.encode("utf-8")
-    resource = RNS.Resource(data, link)
+            if user_area == "main_menu":
+                self.main_menu_handler.handle_main_menu_commands(msg_str, packet, identity_hash_hex)
+            elif user_area == "boards":
+                self.boards_mgr.handle_board_commands(msg_str, packet, identity_hash_hex)
+            else:
+                self.reply_handler.send_link_reply(packet.link, "ERROR: Unknown area.")
 
 if __name__ == "__main__":
     try:
@@ -423,18 +202,19 @@ if __name__ == "__main__":
                     server_config = json.load(f)
                 server_name = server_config.get("server_name", "RetiBBS Server")
                 announce_interval = server_config.get("announce_interval", 0)
-                RNS.log(f"[Server] Loaded server name: '{server_name}' from {args.config_file}")
+                RNS.log(f"[Server] Loaded server name: '{server_name}' from {args.config_file}", RNS.LOG_INFO)
             except Exception as e:
                 RNS.log(f"[Server] Could not load server configuration: {e}", RNS.LOG_ERROR)
-                server_name = "RetiBBS Server"  # Fallback to default name
-                announce_interval = 0   # Fallback to no announce
+                server_name = "RetiBBS Server"
+                announce_interval = 0
         else:
             RNS.log(f"[Server] Configuration file {args.config_file} not found. Using defaults.", RNS.LOG_WARNING)
-            server_name = "RetiBBS Server"  # Default server name
+            server_name = "RetiBBS Server"
             announce_interval = 0
 
-        server_setup(args.reticulum_config, args.identity_file, server_name, announce_interval)
+        server = RetiBBSServer(args.reticulum_config, args.identity_file, server_name, announce_interval)
+        server.run()
 
-    except KeyboardInterrupt:
-        print("")
-        exit()
+    except Exception as e:
+        RNS.log(f"[Server] Unexpected Error: {e}", RNS.LOG_ERROR)
+        sys.exit(1)
