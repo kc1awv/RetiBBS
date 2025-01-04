@@ -320,10 +320,20 @@ class RetiBBSClient(App):
                 self.link.identify(self.client_identity)
                 self.write_log("[CONNECT] Successfully connected to the server.\n\n")
                 self.update_connection_status()
+                try:
+                    self.heartbeat_running = True
+                    self.monitor_running = True
+                    self.start_heartbeat()
+                    self.start_connection_monitor()
+                    self.write_debug_log("[CONNECT] Connection monitoring started.")
+                except Exception as e:
+                    self.write_log(f"[CONNECT] Error starting connection monitoring: {e}")
             else:
                 self.write_log("[CONNECT] Failed: Link could not be established.\n\n")
                 self.link = None
                 self.current_server_name = None
+                self.heartbeat_running = False
+                self.monitor_running = False
                 self.update_connection_status()
 
         except Exception as e:
@@ -342,10 +352,6 @@ class RetiBBSClient(App):
     def on_link_established(self, link):
         #DEBUG: self.write_debug_log("[DEBUG] Link established!")
         #DEBUG: self.write_debug_log(f"[DEBUG] Link status: {link.status}")
-        self.heartbeat_running = True
-        self.monitor_running = True
-        self.start_heartbeat()
-        self.start_connection_monitor()
         latency_widget = self.query_one("#connection_latency", Static)
         latency_widget.update(f"Connection Latency (RTT): [CALCULATING]")
         latency_widget.visible = True

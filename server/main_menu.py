@@ -5,7 +5,7 @@ class MainMenuHandler:
 
     def handle_main_menu_commands(self, command, packet, user_hash):
         user = self.users_mgr.get_user(user_hash)
-        user_display_name = user.get("name", "Unknown User")
+        user_display_name = user.get("name", user_hash)
         tokens = command.split(None, 1)
         if not tokens:
             self.reply_handler.send_link_reply(packet.link, "UNKNOWN COMMAND\n")

@@ -118,7 +118,6 @@ class RetiBBSServer:
             RNS.log(f"[Server] Added new user {display_str} to authorized list.", RNS.LOG_DEBUG)
 
         user = self.users_mgr.get_user(identity_hash_hex)
-        current_board = user.get("current_board", None)
         user_name = user.get("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
         welcome_str = f"Welcome, {user_name} to the {server_name} RetiBBS Server!\n"
 
