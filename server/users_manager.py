@@ -71,7 +71,7 @@ class UsersManager:
                 cursor.execute("""
                     INSERT INTO users (hash_hex, name, current_area, current_board, is_admin) 
                     VALUES (?, ?, ?, ?, ?);
-                """, (hash_hex, name, current_board, is_admin))
+                """, (hash_hex, name, current_area, current_board, is_admin))
                 conn.commit()
                 RNS.log(f"[UsersManager] Added user {hash_hex} (Admin: {is_admin}, Area: {current_area})", RNS.LOG_INFO)
             except sqlite3.IntegrityError:
