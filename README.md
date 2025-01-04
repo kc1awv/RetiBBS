@@ -70,7 +70,7 @@ Main Menu:
   lo | logout             - Log out from the system
 
 ### Admin Commands
-  lu | listusers          - Create a new board
+  lu | listusers          - List users in DB
   a  | admin <user_hash>  - Grant admin rights to a user
 ```
 

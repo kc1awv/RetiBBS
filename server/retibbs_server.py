@@ -106,21 +106,26 @@ class RetiBBSServer:
 
     def client_disconnected(self, link):
         RNS.log("[Server] Client disconnected.", RNS.LOG_DEBUG)
+        remote_identity = link.get_remote_identity()
+        self.users_mgr.remove_user_session(remote_identity.hash.hex())
+        RNS.log(f"[Server] Removed user session for {RNS.prettyhexrep(bytes.fromhex(remote_identity.hash.hex()))}", RNS.LOG_DEBUG)
 
     def remote_identified(self, link, identity):
         identity_hash_hex = identity.hash.hex()
-        display_str = RNS.prettyhexrep(identity.hash)
 
-        RNS.log(f"[Server] Remote identified as {display_str}", RNS.LOG_DEBUG)
-
-        if not self.users_mgr.get_user(identity_hash_hex):
-            self.users_mgr.add_user(identity_hash_hex)
-            RNS.log(f"[Server] Added new user {display_str} to authorized list.", RNS.LOG_DEBUG)
+        RNS.log(f"[Server] Remote identified as {RNS.prettyhexrep(bytes.fromhex(identity_hash_hex))}", RNS.LOG_DEBUG)
 
         user = self.users_mgr.get_user(identity_hash_hex)
+
+        if user is None:
+            self.users_mgr.add_user(identity_hash_hex, name=None, is_admin=False)
+            RNS.log(f"[Server] Added new user {RNS.prettyhexrep(bytes.fromhex(identity_hash_hex))} to database.", RNS.LOG_DEBUG)
+
+        self.users_mgr.set_user_area(identity_hash_hex, "main_menu")
+        self.users_mgr.set_user_board(identity_hash_hex, None)
+
         user_name = user.get("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
         welcome_str = f"Welcome, {user_name} to the {server_name} RetiBBS Server!\n"
-
         reply = f"{welcome_str}You are at the main menu. Use '?' for help."
 
         self.reply_handler.send_area_update(link, "Main Menu")
@@ -133,13 +138,13 @@ class RetiBBSServer:
             return
 
         identity_hash_hex = remote_identity.hash.hex()
-
         user = self.users_mgr.get_user(identity_hash_hex)
+
         if not user:
             RNS.log("[Server] Received data from an unknown user.", RNS.LOG_WARNING)
             return
 
-        user_area = user.get("current_area", "main_menu")
+        user_area = self.users_mgr.get_user_area(identity_hash_hex)
         user_display_name = user.get("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
 
         if message_bytes == b"PING":
