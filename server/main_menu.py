@@ -46,7 +46,7 @@ class MainMenuHandler:
             self.users_mgr.update_user(user_hash, name=proposed_name)
             self.reply_handler.send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
         elif cmd in ["b", "boards"]:
-            self.users_mgr.update_user(user_hash, current_area="boards")
+            self.users_mgr.set_user_area(user_hash, area="boards")
             current_board = user.get("current_board", None)
             self.reply_handler.send_area_update(packet.link, "Message Boards")
             self.reply_handler.send_board_update(packet.link, current_board)

@@ -89,7 +89,7 @@ class BoardsManager:
             )
             self.reply_handler.send_resource_reply(packet.link, reply)
         elif cmd in ["b", "back"]:
-            self.users_mgr.update_user(user_hash, current_area="main_menu")
+            self.users_mgr.set_user_area(user_hash, area="main_menu")
             self.reply_handler.send_area_update(packet.link, "Main Menu")
             self.reply_handler.send_link_reply(packet.link, "Returning to main menu.")
         elif cmd in ["lb", "listboards"]:
@@ -106,7 +106,7 @@ class BoardsManager:
                 self.reply_handler.send_link_reply(packet.link, "Usage: POST <text>")
                 return
             user_info = self.users_mgr.get_user(user_hash)
-            board_name = user_info.get("current_board")
+            board_name = self.users_mgr.get_user_board(user_hash)
             if not board_name:
                 self.reply_handler.send_link_reply(packet.link, "You are not in a board area.")
                 return
@@ -118,7 +118,7 @@ class BoardsManager:
             if board_name:
                 self.handle_list_messages(packet, board_name)
             else:
-                cur_board = user.get("current_board")
+                cur_board = self.users_mgr.get_user_board(user_hash)
                 if not cur_board:
                     self.reply_handler.send_link_reply(packet.link, "You are not in any board. Use BOARD <board> first.")
                 else:
@@ -162,13 +162,12 @@ class BoardsManager:
         self.reply_handler.send_resource_reply(packet.link, reply)
 
     def handle_join_board(self, packet, user_hash, board_name):
-        user_info = self.users_mgr.get_user(user_hash)
-        current = user_info.get("current_board")
+        current = self.users_mgr.get_user_board(user_hash)
 
         if current == board_name:
             reply = f"You are already in board '{board_name}'"
         else:
-            self.users_mgr.update_user(user_hash, current_board=board_name)
+            self.users_mgr.set_user_board(user_hash, board_name)
             reply = f"You have joined board '{board_name}'"
 
         self.reply_handler.send_board_update(packet.link, board_name)

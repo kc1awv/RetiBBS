@@ -3,6 +3,7 @@
 *.log
 *.db
 *.pem
+*.old
 defunct/
 
 # Byte-compiled / optimized / DLL files
