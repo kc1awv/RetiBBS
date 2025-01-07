@@ -12,7 +12,7 @@ Screen {
 #main_log {
     height: 1fr;
     border: round gray;
-    padding: 0 1;
+    padding: 0;
     overflow: auto;
 }
 

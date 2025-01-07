@@ -11,7 +11,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, Grid
 from textual.screen import ModalScreen
-from textual.widgets import Header, Footer, TabbedContent, TabPane, Input, Log, DataTable, Static, Button, Label
+from textual.widgets import Header, Footer, TabbedContent, TabPane, Input, Log, RichLog, DataTable, Static, Button, Label
 
 from rich.text import Text
 
@@ -59,7 +59,7 @@ class RetiBBSClient(App):
         
         main_screen = TabPane(title="Main", id="main")
         main_screen.compose_add_child(
-            Log(id="main_log")
+            RichLog(wrap=True, id="main_log")
         )
 
         log_screen = TabPane(title="Log", id="debug")
@@ -129,8 +129,8 @@ class RetiBBSClient(App):
             self._deferred_debug_log.append(message)
     
     def write_log(self, message):
-        log = self.query_one("#main_log", Log)
-        log.write_line(message)
+        log = self.query_one(RichLog)
+        log.write(message)
 
     def load_or_create_identity(self, identity_path=None):
         if not identity_path:
@@ -187,9 +187,6 @@ class RetiBBSClient(App):
         if not address_book.columns:
             address_book.add_columns("Server Name", "Destination Hash")
 
-        #server_list.visible = True
-        #address_book.visible = True
-
         if hasattr(self, "_deferred_debug_log"):
             for message in self._deferred_debug_log:
                 try:
@@ -244,14 +241,14 @@ class RetiBBSClient(App):
 
     def update_connection_status(self):
         if self.link and self.link.status == RNS.Link.ACTIVE:
-            indicator = Text("[✔] ", style="bold green")
+            indicator = Text("\u2713 ", style="bold green")
             status = f"Connected to {self.current_server_name or 'Unknown Server'}"
             if hasattr(self, "current_area") and self.current_area:
                 status += f" | {self.current_area}"
                 if hasattr(self, "current_board") and self.current_board:
                     status += f" | Board: {self.current_board}"
         else:
-            indicator = Text("[✗] ", style="bold red")
+            indicator = Text("\u2715  ", style="bold red")
             status = "Not Connected"
             latency_widget = self.query_one("#connection_latency", Static)
             latency_widget.visible = False
