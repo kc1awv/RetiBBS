@@ -82,9 +82,21 @@ Each area has its own set of commands. Use `?` or `help` to get a list of comman
 ```json
 {
     "server_name": "changeme",
-    "announce_interval": 300
+    "announce_interval": 300,
+    "theme": "default"
 }
 ```
+
+### Server Themes
+Included with the base code is a default theme in `server/themes/default` that can be copied to a new folder in order to create a new 'theme' for the BBS. Simply:
+```bash
+cd server/themes
+cp -r default/ new_theme/
+cd new_theme
+```
+And edit the text files within. Make sure to update the `server_config.json` file to point towards the new theme directory.
+
+More features (colors, etc.) may be added in the future.
 
 ### Client Address Book (address_book.json)
 Saved servers are stored in JSON format with server names and hashes.
