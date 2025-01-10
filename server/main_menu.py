@@ -1,7 +1,8 @@
 class MainMenuHandler:
-    def __init__(self, users_manager, reply_handler):
+    def __init__(self, users_manager, reply_handler, theme_manager):
         self.users_mgr = users_manager
         self.reply_handler = reply_handler
+        self.theme_mgr = theme_manager
 
     def handle_main_menu_commands(self, command, packet, user_hash):
         user = self.users_mgr.get_user(user_hash)
@@ -46,7 +47,13 @@ class MainMenuHandler:
             self.users_mgr.update_user(user_hash, name=proposed_name)
             self.reply_handler.send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
         elif cmd in ["b", "boards"]:
-            self.users_mgr.set_user_area(user_hash, area="boards")
+            if self.users_mgr.get_user_area(user_hash) != "boards":
+                boards_menu_message = self.theme_mgr.theme_files.get("boards_menu.txt", "Boards Menu: [?] Help [b] Back [lb] List Boards [cb] Change Board [p] Post Message [lm] List Messages")
+                self.reply_handler.send_resource_reply(packet.link, boards_menu_message)
+                self.users_mgr.set_user_area(user_hash, area="boards")
+            else:
+                self.reply_handler.send_link_reply(packet.link, "You are already in the boards area.")
+            #self.users_mgr.set_user_area(user_hash, area="boards")
             current_board = user.get("current_board", None)
             self.reply_handler.send_area_update(packet.link, "Message Boards")
             self.reply_handler.send_board_update(packet.link, current_board)

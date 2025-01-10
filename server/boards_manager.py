@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 import RNS
 
 class BoardsManager:
-    def __init__(self, users_manager, reply_manager, db_path='boards.db'):
+    def __init__(self, users_manager, reply_manager, theme_manager, db_path='boards.db'):
         self.db_path = db_path
         self.lock = threading.Lock()
         self.users_mgr = users_manager
+        self.theme_mgr = theme_manager
         self.reply_handler = reply_manager
         self._initialize_database()
 
@@ -90,8 +91,11 @@ class BoardsManager:
             self.reply_handler.send_resource_reply(packet.link, reply)
         elif cmd in ["b", "back"]:
             self.users_mgr.set_user_area(user_hash, area="main_menu")
+            main_menu_message = self.theme_mgr.theme_files.get("main_menu.txt", 
+                "Main Menu: [?] Help [h] Hello [n] Name [b] Boards Area [lo] Log Out")
+            self.reply_handler.send_resource_reply(packet.link, main_menu_message)
             self.reply_handler.send_area_update(packet.link, "Main Menu")
-            self.reply_handler.send_link_reply(packet.link, "Returning to main menu.")
+            #self.reply_handler.send_link_reply(packet.link, "Returning to main menu.")
         elif cmd in ["lb", "listboards"]:
             self.handle_list_boards(packet)
         elif cmd in ["cb", "changeboard"]:

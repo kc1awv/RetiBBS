@@ -11,6 +11,7 @@ from boards_manager import BoardsManager
 from identity_manager import IdentityManager
 from main_menu import MainMenuHandler
 from reply_handler import ReplyHandler
+from theme_manager import ThemeManager
 from users_manager import UsersManager
 
 class RetiBBSServer:
@@ -21,8 +22,11 @@ class RetiBBSServer:
         self.announce_interval = announce_interval
         self.users_mgr = UsersManager()
         self.reply_handler = ReplyHandler()
-        self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler)
-        self.boards_mgr = BoardsManager(self.users_mgr, self.reply_handler)
+        self.theme_mgr = ThemeManager()
+        self.theme_mgr.load_config()
+        self.theme_mgr.load_theme()
+        self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler, self.theme_mgr)
+        self.boards_mgr = BoardsManager(self.users_mgr, self.reply_handler, self.theme_mgr)
         self.latest_client_link = None
         self.server_identity = None
         self.server_destination = None
@@ -124,12 +128,16 @@ class RetiBBSServer:
         self.users_mgr.set_user_area(identity_hash_hex, "main_menu")
         self.users_mgr.set_user_board(identity_hash_hex, None)
 
-        user_name = user.get("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
-        welcome_str = f"Welcome, {user_name} to the {server_name} RetiBBS Server!\n"
-        reply = f"{welcome_str}You are at the main menu. Use '?' for help."
+        #user_name = self.user_mgr.get_user("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
+        #welcome_str = f"Welcome, {user_name} to the {server_name} RetiBBS Server!\n"
+        #reply = f"{welcome_str}You are at the main menu. Use '?' for help."
+        welcome_message = self.theme_mgr.apply_theme(self)
 
         self.reply_handler.send_area_update(link, "Main Menu")
-        self.reply_handler.send_link_reply(link, reply)
+        self.reply_handler.send_resource_reply(link, welcome_message)
+
+        main_menu_message = self.theme_mgr.theme_files.get("main_menu.txt", "Main Menu: [?] Help [h] Hello [n] Name [b] Boards Area [lo] Log Out")
+        self.reply_handler.send_resource_reply(link, main_menu_message)
 
     def server_packet_received(self, message_bytes, packet):
         remote_identity = packet.link.get_remote_identity()

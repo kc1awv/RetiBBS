@@ -349,6 +349,8 @@ class RetiBBSClient(App):
     def on_link_established(self, link):
         #DEBUG: self.write_debug_log("[DEBUG] Link established!")
         #DEBUG: self.write_debug_log(f"[DEBUG] Link status: {link.status}")
+        main_screen = self.query_one("#main_log", RichLog)
+        main_screen.clear()
         latency_widget = self.query_one("#connection_latency", Static)
         latency_widget.update(f"Connection Latency (RTT): [CALCULATING]")
         latency_widget.visible = True

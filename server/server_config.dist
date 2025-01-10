@@ -1,4 +1,5 @@
 {
     "server_name": "changeme",
-    "announce_interval": 300
+    "announce_interval": 300,
+    "theme": "default"
 }
