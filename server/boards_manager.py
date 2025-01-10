@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 import RNS
 
 class BoardsManager:
-    def __init__(self, users_manager, reply_manager, db_path='boards.db'):
+    def __init__(self, users_manager, reply_manager, theme_manager, db_path='boards.db'):
         self.db_path = db_path
         self.lock = threading.Lock()
         self.users_mgr = users_manager
+        self.theme_mgr = theme_manager
         self.reply_handler = reply_manager
         self._initialize_database()
 
@@ -90,8 +91,11 @@ class BoardsManager:
             self.reply_handler.send_resource_reply(packet.link, reply)
         elif cmd in ["b", "back"]:
             self.users_mgr.set_user_area(user_hash, area="main_menu")
+            main_menu_message = self.theme_mgr.theme_files.get("main_menu.txt", 
+                "Main Menu: [?] Help [h] Hello [n] Name [b] Boards Area [lo] Log Out")
+            self.reply_handler.send_resource_reply(packet.link, main_menu_message)
             self.reply_handler.send_area_update(packet.link, "Main Menu")
-            self.reply_handler.send_link_reply(packet.link, "Returning to main menu.")
+            #self.reply_handler.send_link_reply(packet.link, "Returning to main menu.")
         elif cmd in ["lb", "listboards"]:
             self.handle_list_boards(packet)
         elif cmd in ["cb", "changeboard"]:
@@ -110,9 +114,12 @@ class BoardsManager:
             if not board_name:
                 self.reply_handler.send_link_reply(packet.link, "You are not in a board area.")
                 return
-            self.post_message(board_name, user_info["name"], remainder)
-            reply = f"Posted to board '{board_name}': {post_text}"
-            self.reply_handler.send_link_reply(packet.link, reply)
+            try:
+                self.post_message(board_name, user_info["name"], remainder)
+                reply = f"Posted to board '{board_name}': {post_text}"
+                self.reply_handler.send_link_reply(packet.link, reply)
+            except Exception as e:
+                self.reply_handler.send_link_reply(packet.link, f"Error posting to board '{board_name}': {e}")
         elif cmd in ["lm", "listmessages"]:
             board_name = remainder.strip()
             if board_name:
@@ -161,10 +168,32 @@ class BoardsManager:
             reply = "All Boards:\n" + "\n".join(names) + "\n"
         self.reply_handler.send_resource_reply(packet.link, reply)
 
-    def handle_join_board(self, packet, user_hash, board_name):
-        current = self.users_mgr.get_user_board(user_hash)
+    def board_exists(self, board_name):
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM boards WHERE name = ?;", (board_name,))
+                result = cursor.fetchone()
+                return result is not None  # Return True if the board exists, False otherwise
+            except Exception as e:
+                RNS.log(f"[BoardsManager] Error checking if board '{board_name}' exists: {e}", RNS.LOG_ERROR)
+                return False
+            finally:
+                conn.close()
 
-        if current == board_name:
+    def handle_join_board(self, packet, user_hash, board_name):
+        board_exists = self.board_exists(board_name)
+        current_board = self.users_mgr.get_user_board(user_hash)
+        if not board_exists:
+            if current_board:
+                reply = f"ERROR: Board '{board_name}' does not exist. You are still in board '{current_board}'"
+            else:
+                reply = f"ERROR: Board '{board_name}' does not exist. You are not currently in any board."
+            self.reply_handler.send_link_reply(packet.link, reply)
+            return
+        
+        if current_board == board_name:
             reply = f"You are already in board '{board_name}'"
         else:
             self.users_mgr.set_user_board(user_hash, board_name)
@@ -212,12 +241,13 @@ class BoardsManager:
                 cursor.execute("SELECT id FROM boards WHERE name = ?;", (board_name,))
                 result = cursor.fetchone()
                 if not result:
-                    cursor.execute("INSERT INTO boards (name) VALUES (?);", (board_name,))
-                    board_id = cursor.lastrowid
-                    RNS.log(f"[BoardsManager] Auto-created board '{board_name}'")
+                    RNS.log(f"[BoardsManager] Board '{board_name}' does not exist.", RNS.LOG_ERROR)
+                    #cursor.execute("INSERT INTO boards (name) VALUES (?);", (board_name,))
+                    #board_id = cursor.lastrowid
+                    #RNS.log(f"[BoardsManager] Auto-created board '{board_name}'")
                 else:
                     board_id = result[0]
-
+                
                 timestamp = datetime.now(timezone.utc).timestamp()
                 cursor.execute("""
                     INSERT INTO messages (board_id, timestamp, author, content)

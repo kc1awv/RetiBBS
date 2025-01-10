@@ -1,0 +1,9 @@
+╔════════════════════════════════════════╗
+║ == Main Menu ==                        ║
+║                                        ║
+║ ?  | help   - Show help text           ║
+║ h  | hello  - Check Auth               ║
+║ n  | name   - Set display name         ║
+║ b  | boards - Switch to Message Boards ║
+║ lo | logout - Log out                  ║
+╚════════════════════════════════════════╝
