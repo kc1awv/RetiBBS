@@ -14,6 +14,14 @@ RetiBBS allows users to communicate through message boards in a secure manner.
 - Admin privileges for board management
 - Simple text-based command interface
 
+## Reference Implementation
+
+A reference RetiBBS server implementation is hosted by me, at Kaizen.
+
+Its identity hash is: `b40428672a09c6c100ca82c10e5d945f` or you can wait for the server to announce itself. The server is connected to the Beleth RNS Hub, which in turn is connected to the Reticulum Testnet.
+
+I will try to keep this reference implementation up to date, usually within a couple hours of any PR merges. This means that the reference server _may_ be unavailable for a short time while the updates are applied.
+
 # Installation
 
 It is strongly suggested to use this alpha software in its own Python virtual environment.
