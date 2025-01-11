@@ -104,7 +104,25 @@ cd new_theme
 ```
 And edit the text files within. Make sure to update the `server_config.json` file to point towards the new theme directory.
 
-More features (colors, etc.) may be added in the future.
+[Rich Text](https://github.com/Textualize/rich) support for colors and other styles is available from commit [26bc656](https://github.com/kc1awv/RetiBBS/commit/26bc6564170c486aa21d1e8e2edc7b60b95b6dc4) in the client.
+
+Using [Rich Text Markup](https://rich.readthedocs.io/en/latest/markup.html) in the theme files is probably the easiest way to utilize colors. For example:
+
+```
+[bold italic]Welcome to[/]
+[bold red]
+ _  __     _
+| |/ /__ _(_)_______ _ __
+| ' // _` | |_  / _ \ '_ \
+| . \ (_| | |/ /  __/ | | |
+|_|\_\__,_|_/___\___|_| |_| 改善
+[/]
+A Reference RetiBBS Server Instance
+-----------------------------------
+```
+will produce this on the client:
+
+![Client with color](meta/client_color.png)
 
 ### Client Address Book (address_book.json)
 Saved servers are stored in JSON format with server names and hashes.
