@@ -133,6 +133,7 @@ class RetiBBSServer:
         #reply = f"{welcome_str}You are at the main menu. Use '?' for help."
         welcome_message = self.theme_mgr.apply_theme(self)
 
+        self.reply_handler.send_clear_screen(link)
         self.reply_handler.send_area_update(link, "Main Menu")
         self.reply_handler.send_resource_reply(link, welcome_message)
 
