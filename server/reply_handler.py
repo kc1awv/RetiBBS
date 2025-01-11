@@ -25,6 +25,16 @@ class ReplyHandler:
             RNS.log(f"[ReplyHandler] Sent resource reply (length={len(data)} bytes)", RNS.LOG_DEBUG)
         except Exception as e:
             RNS.log(f"[ReplyHandler] Error sending resource reply: {e}", RNS.LOG_ERROR)
+    
+    @staticmethod
+    def send_clear_screen(link):
+        try:
+            control_packet = b"CTRL CLS"
+            packet = RNS.Packet(link, control_packet)
+            packet.send()
+            RNS.log(f"[ReplyHandler] Sent clear screen", RNS.LOG_DEBUG)
+        except Exception as e:
+            RNS.log(f"[ReplyHandler] Error sending clear screen: {e}", RNS.LOG_ERROR)
 
     @staticmethod
     def send_area_update(link, area):

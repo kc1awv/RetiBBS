@@ -48,6 +48,7 @@ class MainMenuHandler:
             self.reply_handler.send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
         elif cmd in ["b", "boards"]:
             if self.users_mgr.get_user_area(user_hash) != "boards":
+                self.reply_handler.send_clear_screen(packet.link)
                 boards_menu_message = self.theme_mgr.theme_files.get("boards_menu.txt", "Boards Menu: [?] Help [b] Back [lb] List Boards [cb] Change Board [p] Post Message [lm] List Messages")
                 self.reply_handler.send_resource_reply(packet.link, boards_menu_message)
                 self.users_mgr.set_user_area(user_hash, area="boards")
@@ -57,7 +58,7 @@ class MainMenuHandler:
             current_board = user.get("current_board", None)
             self.reply_handler.send_area_update(packet.link, "Message Boards")
             self.reply_handler.send_board_update(packet.link, current_board)
-            self.reply_handler.send_link_reply(packet.link, "Welcome to the boards area. Use '?' for help.")
+            #self.reply_handler.send_link_reply(packet.link, "Welcome to the boards area. Use '?' for help.")
         elif cmd in ["lo", "logout"]:
             self.reply_handler.send_link_reply(packet.link, "You have been logged out. Goodbye!\n")
             packet.link.teardown()

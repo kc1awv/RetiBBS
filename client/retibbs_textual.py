@@ -59,7 +59,7 @@ class RetiBBSClient(App):
         
         main_screen = TabPane(title="Main", id="main")
         main_screen.compose_add_child(
-            RichLog(wrap=True, id="main_log")
+            RichLog(markup=True, wrap=True, id="main_log")
         )
 
         log_screen = TabPane(title="Log", id="debug")
@@ -449,6 +449,9 @@ class RetiBBSClient(App):
             latency_widget = self.query_one("#connection_latency", Static)
             latency_widget.update(f"Connection Latency (RTT): {round_trip_time:.3f} seconds")
             return
+        elif message_bytes.startswith(b"CTRL CLS"):
+            main_screen = self.query_one("#main_log", RichLog)
+            main_screen.clear()
         elif message_bytes.startswith(b"CTRL AREA"):
             try:
                 decoded_message = message_bytes.decode("utf-8")

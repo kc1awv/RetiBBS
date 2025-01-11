@@ -90,6 +90,7 @@ class BoardsManager:
             )
             self.reply_handler.send_resource_reply(packet.link, reply)
         elif cmd in ["b", "back"]:
+            self.reply_handler.send_clear_screen(packet.link)
             self.users_mgr.set_user_area(user_hash, area="main_menu")
             main_menu_message = self.theme_mgr.theme_files.get("main_menu.txt", 
                 "Main Menu: [?] Help [h] Hello [n] Name [b] Boards Area [lo] Log Out")
