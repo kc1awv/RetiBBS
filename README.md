@@ -124,6 +124,8 @@ will produce this on the client:
 
 ![Client with color](meta/client_color.png)
 
+Clients not up to date with at least commit `26bc656` will show the markup. If you see the markup code where colors are expected, please pull the latest commit.
+
 ### Client Address Book (address_book.json)
 Saved servers are stored in JSON format with server names and hashes.
 
