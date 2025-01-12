@@ -178,17 +178,17 @@ class BoardsManager:
         self.reply_handler.send_board_update(packet.link, board_name)
         self.reply_handler.send_link_reply(packet.link, reply)
 
-    def handle_list_messages(self, packet, remainder, user_hash):
+    def handle_list_messages(self, packet, remainder, user_hash, page=None, page_size=10):
         board_name = remainder.strip()
         if not board_name:
             board_name = self.users_mgr.get_user_board(user_hash)
             if not board_name:
                 self.reply_handler.send_link_reply(packet.link, "You are not in any board. Use CHANGEBOARD <board> first.")
                 return
-        current_page = self.user_pages.get(user_hash, 1)
+        current_page = page or self.user_pages.get(user_hash, 1)
         try:
             posts, total_messages = self.list_messages(board_name, page=current_page)
-            total_pages = math.ceil(total_messages / 10)
+            total_pages = math.ceil(total_messages / page_size)
             if not posts:
                 reply = f"No messages found in board '{board_name}'."
             else:
