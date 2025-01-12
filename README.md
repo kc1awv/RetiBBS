@@ -24,21 +24,21 @@ I will try to keep this reference implementation up to date, usually within a co
 
 # Installation
 
+1. Clone this repository:
+```sh
+git clone https://github.com/kc1awv/RetiBBS.git
+cd RetiBBS
+```
+
 It is strongly suggested to use this alpha software in its own Python virtual environment.
 ```sh
 python -m venv .venv
 source .venv/bin/activate
 ```
 
-1. Install Textual and the Reticulum Network Stack:
+2. Install Textual, Reticulum Network Stack, and LXMF:
 ```sh
-pip install rns textual
-```
-
-2. Clone this repository:
-```sh
-git clone https://github.com/kc1awv/RetiBBS.git
-cd RetiBBS
+pip install rns lxmf textual
 ```
 
 ## Usage
@@ -71,11 +71,13 @@ python retibbs_textual.py [OPTIONS]
 ```
 Main Menu:
 
-  ?  | help               - Show help text and available commands
-  h  | hello              - Check authorization status
-  n  | name <name>        - Set your display name
-  b  | boards             - Switch to message boards area
-  lo | logout             - Log out from the system
+  ?  | help                       - Show help text and available commands
+  h  | hello                      - Check authorization status
+  n  | name <name>                - Set your display name
+  d  | destination <LXMF Address> - Set LXMF destination for board alerts
+  td | testdestination            - Send a test LXMF message
+  b  | boards                     - Switch to message boards area
+  lo | logout                     - Log out from the system
 
 ### Admin Commands
   lu | listusers          - List users in DB
@@ -154,4 +156,6 @@ RetiBBS utilizes Reticulum's built-in encryption and authentication mechanisms t
 
 - Python 3.x
 - [Reticulum Network Stack](https://reticulum.network/)
+- [LXMF](https://github.com/markqvist/LXMF)
 - [Textual](https://textual.textualize.io/)
+- [Rich](https://github.com/Textualize/rich)

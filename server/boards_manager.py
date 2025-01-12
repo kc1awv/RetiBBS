@@ -1,3 +1,4 @@
+import asyncio
 import math
 import time
 import sqlite3
@@ -8,11 +9,12 @@ from datetime import datetime, timezone
 import RNS
 
 class BoardsManager:
-    def __init__(self, users_manager, reply_manager, theme_manager, db_path='boards.db'):
+    def __init__(self, users_manager, reply_manager, lxmf_handler, theme_manager, db_path='boards.db'):
         self.db_path = db_path
         self.lock = threading.Lock()
         self.users_mgr = users_manager
         self.theme_mgr = theme_manager
+        self.lxmf_handler = lxmf_handler
         self.reply_handler = reply_manager
         self.user_pages = {}
         self._initialize_database()
@@ -49,6 +51,14 @@ class BoardsManager:
                         FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
                     );
                 """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS watched_boards (
+                        user_hash TEXT NOT NULL,
+                        board_id INTEGER NOT NULL,
+                        PRIMARY KEY (user_hash, board_id),
+                        FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE
+                    );
+                """)
                 conn.commit()
                 RNS.log(f"[BoardsManager] Database initialized at {self.db_path}", RNS.LOG_INFO)
             except Exception as e:
@@ -57,6 +67,9 @@ class BoardsManager:
                 conn.close()
     
     def handle_board_commands(self, command, packet, user_hash):
+        """
+        Handle commands in the boards area.
+        """
         tokens = command.split(None, 1)
         if not tokens:
             self.reply_handler.send_link_reply(packet.link, "UNKNOWN COMMAND\n")
@@ -71,6 +84,12 @@ class BoardsManager:
             self.handle_list_boards(packet)
         elif cmd in ["cb", "changeboard"]:
             self.handle_change_board(packet, remainder, user_hash)
+        elif cmd in ["w", "watch"]:
+            self.handle_watch(packet, remainder, user_hash)
+        elif cmd in ["uw", "unwatch"]:
+            self.handle_unwatch(packet, remainder, user_hash)
+        elif cmd in ["wl", "watchlist"]:
+            self.handle_watchlist(packet, user_hash)
         elif cmd in ["p", "post"]:
             self.handle_post_message(packet, remainder, user_hash)
         elif cmd in ["lm", "listmessages"]:
@@ -93,6 +112,9 @@ class BoardsManager:
             self.reply_handler.send_link_reply(packet.link, f"Unknown command: {cmd} in board area.")
     
     def handle_help(self, packet, user_hash):
+        """
+        Show help text for the boards area.
+        """
         user = self.users_mgr.get_user(user_hash)
         reply = (
             "You are in the message boards area.\n\n"
@@ -101,6 +123,9 @@ class BoardsManager:
             "  b  | back                           - Return to main menu\n"
             "  lb | listboards                     - List all boards\n"
             "  cb | changeboard <boardname>        - Switch to a board (so you can post/list by default)\n"
+            "  w  | watch <boardname>              - Add a board to your watchlist\n"
+            "  uw | unwatch <boardname>            - Remove a board from your watchlist\n"
+            "  wl | watchlist                      - List boards you are watching\n"
             "  p  | post <text>                    - Post a message to your current board\n"
             "  lm | listmessages \[boardname]       - List messages in 'boardname' or your current board\n"
             "  lu | listunread                     - List unread messages in your current board\n"
@@ -118,6 +143,9 @@ class BoardsManager:
         self.reply_handler.send_resource_reply(packet.link, reply)
 
     def handle_back(self, packet, user_hash):
+        """
+        Return to the main menu.
+        """
         self.reply_handler.send_clear_screen(packet.link)
         self.users_mgr.set_user_area(user_hash, area="main_menu")
         main_menu_message = self.theme_mgr.theme_files.get("header.txt", "Welcome to RetiBBS")
@@ -130,6 +158,9 @@ class BoardsManager:
         self.reply_handler.send_area_update(packet.link, "Main Menu")
 
     def handle_list_boards(self, packet):
+        """
+        List all boards.
+        """
         names = self.list_boards()
         if not names:
             reply = "No boards exist."
@@ -138,6 +169,9 @@ class BoardsManager:
         self.reply_handler.send_resource_reply(packet.link, reply)
 
     def board_exists(self, board_name):
+        """
+        Check if a board exists.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -152,6 +186,9 @@ class BoardsManager:
                 conn.close()
 
     def handle_change_board(self, packet, board_name, user_hash):
+        """
+        Change the user's current board.
+        """
         board_name = board_name.strip()
         if not board_name:
             self.reply_handler.send_link_reply(packet.link, "Usage: CHANGEBOARD <board_name>")
@@ -173,8 +210,63 @@ class BoardsManager:
             reply += "\n\nCommands: 'lm' to list messages, 'lu' to list unread messages."
         self.reply_handler.send_board_update(packet.link, board_name)
         self.reply_handler.send_link_reply(packet.link, reply)
+    
+    def handle_watch(self, packet, board_name, user_hash):
+        """
+        Add a board to the user's watchlist.
+        """
+        board_name = board_name.strip()
+        if not board_name:
+            self.reply_handler.send_link_reply(packet.link, "Usage: WATCH <board_name>")
+            return
+
+        try:
+            destination_address = self.users_mgr.get_user_destination_address(user_hash)
+            if not destination_address:
+                self.reply_handler.send_link_reply(packet.link, "You cannot watch a board without an LXMF address set. Go back to the main menu and use the 'destination' command to set one.")
+                return
+            self.add_to_watchlist(user_hash, board_name)
+            self.reply_handler.send_link_reply(packet.link, f"Board '{board_name}' added to your watchlist.")
+        except ValueError as e:
+            self.reply_handler.send_link_reply(packet.link, str(e))
+        except Exception:
+            self.reply_handler.send_link_reply(packet.link, f"Error adding board '{board_name}' to watchlist.")
+
+    def handle_unwatch(self, packet, board_name, user_hash):
+        """
+        Remove a board from the user's watchlist.
+        """
+        board_name = board_name.strip()
+        if not board_name:
+            self.reply_handler.send_link_reply(packet.link, "Usage: UNWATCH <board_name>")
+            return
+
+        try:
+            self.remove_from_watchlist(user_hash, board_name)
+            self.reply_handler.send_link_reply(packet.link, f"Board '{board_name}' removed from your watchlist.")
+        except ValueError as e:
+            self.reply_handler.send_link_reply(packet.link, str(e))
+        except Exception:
+            self.reply_handler.send_link_reply(packet.link, f"Error removing board '{board_name}' from watchlist.")
+        
+    def handle_watchlist(self, packet, user_hash):
+        """
+        List the boards a user is watching.
+        """
+        try:
+            watchlist = self.list_watchlist(user_hash)
+            if not watchlist:
+                reply = "You are not watching any boards."
+            else:
+                reply = "Your watchlist:\n" + "\n".join(watchlist)
+            self.reply_handler.send_link_reply(packet.link, reply)
+        except Exception:
+            self.reply_handler.send_link_reply(packet.link, "Error retrieving your watchlist.")
 
     def handle_list_messages(self, packet, remainder, user_hash, page=None, page_size=10):
+        """
+        List messages in a board.
+        """
         board_name = remainder.strip()
         if not board_name:
             board_name = self.users_mgr.get_user_board(user_hash)
@@ -203,6 +295,9 @@ class BoardsManager:
             self.reply_handler.send_link_reply(packet.link, f"Error listing messages for board '{board_name}': {e}")
 
     def handle_list_unread_messages(self, packet, user_hash):
+        """
+        List unread messages in the user's current board.
+        """
         board_name = self.users_mgr.get_user_board(user_hash)
         if not board_name:
             self.reply_handler.send_link_reply(packet.link, "You are not in any board. Use CHANGEBOARD <board> first.")
@@ -219,6 +314,9 @@ class BoardsManager:
         self.reply_handler.send_resource_reply(packet.link, reply)
 
     def handle_next_page(self, packet, user_hash):
+        """
+        Go to the next page of messages in the current board.
+        """
         current_board = self.users_mgr.get_user_board(user_hash)
         if not current_board:
             self.reply_handler.send_link_reply(packet.link, "You are not in any board. Use CHANGEBOARD <board> first.")
@@ -232,6 +330,9 @@ class BoardsManager:
             self.handle_list_messages(packet, current_board, user_hash, page=current_page + 1)
 
     def handle_prev_page(self, packet, user_hash):
+        """
+        Go to the previous page of messages in the current board.
+        """
         current_board = self.users_mgr.get_user_board(user_hash)
         if not current_board:
             self.reply_handler.send_link_reply(packet.link, "You are not in any board. Use CHANGEBOARD <board> first.")
@@ -244,6 +345,9 @@ class BoardsManager:
             self.handle_list_messages(packet, current_board, user_hash, page=current_page - 1)
 
     def handle_read_message(self, packet, message_id, user_hash):
+        """
+        Read a message by ID.
+        """
         message_id = message_id.strip()
         if not message_id:
             self.reply_handler.send_link_reply(packet.link, "Usage: READ <message_id>")
@@ -276,6 +380,9 @@ class BoardsManager:
         self.reply_handler.send_resource_reply(packet.link, reply)
 
     def mark_message_as_read(self, user_hash, message_id):
+        """
+        Mark a message as read for a user.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -292,6 +399,9 @@ class BoardsManager:
                 conn.close()
     
     def handle_post_message(self, packet, remainder, user_hash):
+        """
+        Post a message to a board.
+        """
         post_text = remainder.strip()
         if not post_text:
             self.reply_handler.send_link_reply(packet.link, "Usage: POST <topic> | <message content>")
@@ -320,10 +430,14 @@ class BoardsManager:
             self.post_message(board_name, author, topic, content)
             reply = f"Posted to board '{board_name}': [{topic}] {content}"
             self.reply_handler.send_link_reply(packet.link, reply)
+            self.notify_watchers(board_name, topic, content, author)
         except Exception as e:
             self.reply_handler.send_link_reply(packet.link, f"Error posting to board '{board_name}': {e}")
     
     def handle_reply(self, packet, remainder, user_hash):
+        """
+        Reply to a message.
+        """
         if "|" not in remainder:
             self.reply_handler.send_link_reply(packet.link, "Usage: REPLY <message_id> | <content>")
             return
@@ -346,6 +460,7 @@ class BoardsManager:
             topic = f"Re: {parent_message['topic']}"
             self.post_message(board_name, author, topic, content, parent_id=message_id)
             self.reply_handler.send_link_reply(packet.link, f"Reply posted to message ID {message_id}.")
+            self.notify_message_author(parent_message, topic, content, author)
         except ValueError:
             self.reply_handler.send_link_reply(packet.link, "Usage: REPLY <message_id> | <content>")
         except Exception as e:
@@ -353,10 +468,16 @@ class BoardsManager:
             RNS.log(f"[BoardsManager] Error in reply command: {e}", RNS.LOG_ERROR)
     
     def is_admin(self, user_hash):
+        """
+        Check if a user is an admin.
+        """
         user_info = self.users_mgr.get_user(user_hash)
         return user_info.get("is_admin", False)
     
     def handle_new_board(self, packet, remainder, user_hash):
+        """
+        Create a new board.
+        """
         if not self.is_admin(user_hash):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can create boards.")
             return
@@ -371,6 +492,9 @@ class BoardsManager:
         self.reply_handler.send_link_reply(packet.link, f"Board '{board_name}' is ready.")
     
     def handle_delete_board(self, packet, remainder, user_hash):
+        """
+        Delete a board.
+        """
         if not self.is_admin(user_hash):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can delete boards.")
             return
@@ -387,6 +511,9 @@ class BoardsManager:
         return board_name.isalnum() and 3 <= len(board_name) <= 20
 
     def post_message(self, board_name, author, topic, content, parent_id=None):
+        """
+        Post a message to a board.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -409,7 +536,64 @@ class BoardsManager:
             finally:
                 conn.close()
     
+    def notify_watchers(self, board_name, topic, content, author):
+        """
+        Notify users watching a board about a new post.
+        """
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM boards WHERE name = ?;", (board_name,))
+                board_id = cursor.fetchone()[0]
+                cursor.execute("SELECT user_hash FROM watched_boards WHERE board_id = ?;", (board_id,))
+                watchers = cursor.fetchall()
+                for watcher in watchers:
+                    user_hash = watcher[0]
+                    destination_address = self.users_mgr.get_user_destination_address(user_hash)
+                    if not destination_address:
+                        RNS.log(f"[BoardsManager] User {user_hash} does not have a destination address. Notification skipped.", RNS.LOG_WARNING)
+                        continue
+                    asyncio.run(self.lxmf_handler.enqueue_message(
+                        destination_address,
+                        f"New post in {board_name}",
+                        f"Author: {author}\nTopic: {topic}\n\n{content}"
+                    ))
+                    RNS.log(f"[BoardsManager] Notified watcher {user_hash} of new post in '{board_name}'", RNS.LOG_DEBUG)
+            except Exception as e:
+                RNS.log(f"[BoardsManager] Error notifying watchers of board '{board_name}': {e}", RNS.LOG_ERROR)
+            finally:
+                conn.close()
+
+    def notify_message_author(self, parent_message, topic, content, replier):
+        """
+        Notify the author of a message about a new reply.
+        """
+        try:
+            author = parent_message["author"]
+            user = None
+            if author:
+                user = self.users_mgr.get_user_by_name(author) or self.users_mgr.get_user(author)
+            if not user:
+                RNS.log(f"[BoardsManager] No matching user found for author '{author}'. Notification skipped.", RNS.LOG_WARNING)
+                return
+            destination_address = user.get("destination_address")
+            if not destination_address:
+                RNS.log(f"[BoardsManager] User '{author}' does not have a destination address. Notification skipped.", RNS.LOG_WARNING)
+                return
+            RNS.log(f"[BoardsManager] Sending notification to {destination_address} for reply to message {parent_message['id']}.", RNS.LOG_DEBUG)
+            asyncio.run(self.lxmf_handler.enqueue_message(
+                recipient=destination_address,
+                title=f"Reply to your post: {parent_message['topic']}",
+                body=f"Replier: {replier}\nTopic: {topic}\n\n{content}"
+            ))
+        except Exception as e:
+            RNS.log(f"[BoardsManager] Error notifying author of reply: {e}", RNS.LOG_ERROR)
+    
     def list_boards(self):
+        """
+        List all boards.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -425,6 +609,9 @@ class BoardsManager:
                 conn.close()
 
     def list_messages(self, board_name, page=1, page_size=10):
+        """
+        List messages in a board.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -467,6 +654,9 @@ class BoardsManager:
                 conn.close()
 
     def list_unread_messages(self, board_name, user_hash):
+        """
+        List all unread messages in a board for a user.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -501,6 +691,9 @@ class BoardsManager:
                 conn.close()
 
     def get_message_by_id(self, message_id):
+        """
+        Retrieve a message by its ID.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -512,6 +705,7 @@ class BoardsManager:
                 row = cursor.fetchone()
                 if row:
                     return {
+                        "id": message_id,
                         "timestamp": row[0],
                         "author": row[1],
                         "topic": row[2],
@@ -523,8 +717,82 @@ class BoardsManager:
                 return None
             finally:
                 conn.close()
+
+    def add_to_watchlist(self, user_hash, board_name):
+        """
+        Add a board to the user's watchlist.
+        """
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM boards WHERE name = ?;", (board_name,))
+                result = cursor.fetchone()
+                if not result:
+                    raise ValueError(f"Board '{board_name}' does not exist.")
+                board_id = result[0]
+                cursor.execute("""
+                    INSERT OR IGNORE INTO watched_boards (user_hash, board_id)
+                    VALUES (?, ?);
+                """, (user_hash, board_id))
+                conn.commit()
+                RNS.log(f"[BoardsManager] User {user_hash} added board '{board_name}' to watchlist.", RNS.LOG_INFO)
+            except Exception as e:
+                RNS.log(f"[BoardsManager] Error adding board '{board_name}' to watchlist for user {user_hash}: {e}", RNS.LOG_ERROR)
+                raise
+            finally:
+                conn.close()
+
+    def remove_from_watchlist(self, user_hash, board_name):
+        """
+        Remove a board from the user's watchlist.
+        """
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM boards WHERE name = ?;", (board_name,))
+                result = cursor.fetchone()
+                if not result:
+                    raise ValueError(f"Board '{board_name}' does not exist.")
+                board_id = result[0]
+                cursor.execute("""
+                    DELETE FROM watched_boards WHERE user_hash = ? AND board_id = ?;
+                """, (user_hash, board_id))
+                conn.commit()
+                RNS.log(f"[BoardsManager] User {user_hash} removed board '{board_name}' from watchlist.", RNS.LOG_INFO)
+            except Exception as e:
+                RNS.log(f"[BoardsManager] Error removing board '{board_name}' from watchlist for user {user_hash}: {e}", RNS.LOG_ERROR)
+                raise
+            finally:
+                conn.close()
+
+    def list_watchlist(self, user_hash):
+        """
+        List all boards in the user's watchlist.
+        """
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT b.name
+                    FROM boards b
+                    JOIN watched_boards w ON b.id = w.board_id
+                    WHERE w.user_hash = ?;
+                """, (user_hash,))
+                rows = cursor.fetchall()
+                return [row[0] for row in rows]
+            except Exception as e:
+                RNS.log(f"[BoardsManager] Error listing watchlist for user {user_hash}: {e}", RNS.LOG_ERROR)
+                return []
+            finally:
+                conn.close()
     
     def list_replies(self, parent_id):
+        """
+        List all replies to a message.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -549,6 +817,9 @@ class BoardsManager:
                 conn.close()
 
     def create_board(self, board_name):
+        """
+        Create a new message board.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -564,6 +835,9 @@ class BoardsManager:
                 conn.close()
 
     def delete_board(self, board_name):
+        """
+        Delete a message board.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
