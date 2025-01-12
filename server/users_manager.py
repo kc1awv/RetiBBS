@@ -21,6 +21,7 @@ class UsersManager:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         hash_hex TEXT UNIQUE NOT NULL,
                         name TEXT,
+                        destination_address TEXT DEFAULT NULL,
                         is_admin BOOLEAN DEFAULT 0
                     );
                 """)
@@ -86,18 +87,45 @@ class UsersManager:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT hash_hex, name, is_admin FROM users WHERE hash_hex = ?;
+                    SELECT hash_hex, name, destination_address, is_admin FROM users WHERE hash_hex = ?;
                 """, (hash_hex,))
                 result = cursor.fetchone()
                 if result:
                     return {
                         "hash_hex": result[0],
                         "name": result[1],
-                        "is_admin": result[2]
+                        "destination_address": result[2],
+                        "is_admin": result[3]
                     }
                 return None
             except Exception as e:
                 RNS.log(f"[UsersManager] Error retrieving user {hash_hex}: {e}", RNS.LOG_ERROR)
+                return None
+            finally:
+                conn.close()
+    
+    def get_user_by_name(self, name):
+        """
+        Retrieve a user by their name.
+        """
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT hash_hex, name, destination_address, is_admin FROM users WHERE name = ?;
+                """, (name,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "hash_hex": row[0],
+                        "name": row[1],
+                        "destination_address": row[2],
+                        "is_admin": row[3]
+                    }
+                return None
+            except Exception as e:
+                RNS.log(f"[UsersManager] Error retrieving user by name '{name}': {e}", RNS.LOG_ERROR)
                 return None
             finally:
                 conn.close()
@@ -153,6 +181,39 @@ class UsersManager:
             except Exception as e:
                 RNS.log(f"[UsersManager] Error listing users: {e}", RNS.LOG_ERROR)
                 return []
+            finally:
+                conn.close()
+
+    def set_user_destination_address(self, user_hash, destination_address):
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE users
+                    SET destination_address = ?
+                    WHERE hash_hex = ?;
+                """, (destination_address, user_hash))
+                conn.commit()
+                RNS.log(f"[UsersManager] Updated destination address for user {user_hash}.", RNS.LOG_INFO)
+            except Exception as e:
+                RNS.log(f"[UsersManager] Error updating destination address for user {user_hash}: {e}", RNS.LOG_ERROR)
+            finally:
+                conn.close()
+
+    def get_user_destination_address(self, user_hash):
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT destination_address FROM users WHERE hash_hex = ?;
+                """, (user_hash,))
+                row = cursor.fetchone()
+                return row[0] if row else None
+            except Exception as e:
+                RNS.log(f"[UsersManager] Error retrieving destination address for user {user_hash}: {e}", RNS.LOG_ERROR)
+                return None
             finally:
                 conn.close()
 

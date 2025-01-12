@@ -1,9 +1,11 @@
-╔════════════════════════════════════════╗
-║ == Main Menu ==                        ║
-║                                        ║
-║ ?  | help   - Show help text           ║
-║ h  | hello  - Check Auth               ║
-║ n  | name   - Set display name         ║
-║ b  | boards - Switch to Message Boards ║
-║ lo | logout - Log out                  ║
-╚════════════════════════════════════════╝
+╔═════════════════════════════════════════════════════════════════════════╗
+║ == Main Menu ==                                                         ║
+║                                                                         ║
+║ ?  | help                       - Show help text                        ║
+║ h  | hello                      - Check Auth and LXMF destination       ║
+║ n  | name <name>                - Set display name                      ║
+║ d  | destination <LXMF Address> - Set LXMF destination for board alerts ║
+║ td | testdestination            - Send a test LXMF message              ║
+║ b  | boards                     - Switch to Message Boards              ║
+║ lo | logout                     - Log out                               ║
+╚═════════════════════════════════════════════════════════════════════════╝

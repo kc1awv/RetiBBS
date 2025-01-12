@@ -5,6 +5,7 @@
 *.pem
 *.old
 defunct/
+lxmf_storage/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

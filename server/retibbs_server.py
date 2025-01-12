@@ -9,6 +9,7 @@ import RNS
 from automatic_announcer import AutomaticAnnouncer
 from boards_manager import BoardsManager
 from identity_manager import IdentityManager
+from lxmf_handler import LXMFHandler
 from main_menu import MainMenuHandler
 from reply_handler import ReplyHandler
 from theme_manager import ThemeManager
@@ -25,8 +26,8 @@ class RetiBBSServer:
         self.theme_mgr = ThemeManager()
         self.theme_mgr.load_config()
         self.theme_mgr.load_theme()
-        self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler, self.theme_mgr)
-        self.boards_mgr = BoardsManager(self.users_mgr, self.reply_handler, self.theme_mgr)
+        self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler, None, self.theme_mgr)
+        self.boards_mgr = BoardsManager(self.users_mgr, self.reply_handler, None, self.theme_mgr)
         self.latest_client_link = None
         self.server_identity = None
         self.server_destination = None
@@ -47,6 +48,15 @@ class RetiBBSServer:
             "bbs"
         )
         self.server_destination.set_link_established_callback(self.client_connected)
+
+        self.lxmf_handler = LXMFHandler(
+            storage_path="./lxmf_storage",
+            identity=self.server_identity,
+            display_name=self.server_name
+        )
+        self.lxmf_handler.set_delivery_callback(self.lxmf_delivery_callback)
+        self.main_menu_handler.lxmf_handler = self.lxmf_handler
+        self.boards_mgr.lxmf_handler = self.lxmf_handler
 
         RNS.log(f"[Server] BBS Server running. Identity hash: {RNS.prettyhexrep(self.server_destination.hash)}", RNS.LOG_INFO)
 
@@ -139,6 +149,13 @@ class RetiBBSServer:
 
         main_menu_message = self.theme_mgr.theme_files.get("main_menu.txt", "Main Menu: [?] Help [h] Hello [n] Name [b] Boards Area [lo] Log Out")
         self.reply_handler.send_resource_reply(link, main_menu_message)
+    
+    def lxmf_delivery_callback(self, message):
+        """
+        Callback for LXMF delivery events.
+        :param message: The LXMF message that was delivered.
+        """
+        RNS.log(f"[LXMF] Message delivered: {message.title if message.title else 'No Title'}", RNS.LOG_INFO)
 
     def server_packet_received(self, message_bytes, packet):
         remote_identity = packet.link.get_remote_identity()
