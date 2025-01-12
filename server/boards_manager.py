@@ -42,12 +42,12 @@ class BoardsManager:
                     );
                 """)
                 cursor.execute("""
-                CREATE TABLE IF NOT EXISTS read_messages (
-                    user_hash TEXT NOT NULL,
-                    message_id INTEGER NOT NULL,
-                    PRIMARY KEY (user_hash, message_id),
-                    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-                );
+                    CREATE TABLE IF NOT EXISTS read_messages (
+                        user_hash TEXT NOT NULL,
+                        message_id INTEGER NOT NULL,
+                        PRIMARY KEY (user_hash, message_id),
+                        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+                    );
                 """)
                 conn.commit()
                 RNS.log(f"[BoardsManager] Database initialized at {self.db_path}", RNS.LOG_INFO)
@@ -70,11 +70,7 @@ class BoardsManager:
         elif cmd in ["lb", "listboards"]:
             self.handle_list_boards(packet)
         elif cmd in ["cb", "changeboard"]:
-            board_name = remainder.strip()
-            if not board_name:
-                self.reply_handler.send_link_reply(packet.link, "Usage: CHANGEBOARD <board_name>")
-                return
-            self.handle_change_board(packet, user_hash, board_name)
+            self.handle_change_board(packet, remainder, user_hash)
         elif cmd in ["p", "post"]:
             self.handle_post_message(packet, remainder, user_hash)
         elif cmd in ["lm", "listmessages"]:
@@ -86,11 +82,7 @@ class BoardsManager:
         elif cmd in ["<", "prev"]:
             self.handle_prev_page(packet, user_hash)
         elif cmd in ["r", "read"]:
-            message_id = remainder.strip()
-            if not message_id:
-                self.reply_handler.send_link_reply(packet.link, "Usage: READ <message_id>")
-                return
-            self.handle_read_message(packet, message_id, user_hash)
+            self.handle_read_message(packet, remainder, user_hash)
         elif cmd in ["re", "reply"]:
             self.handle_reply(packet, remainder, user_hash)
         elif cmd in ["nb", "newboard"]:
@@ -159,7 +151,11 @@ class BoardsManager:
             finally:
                 conn.close()
 
-    def handle_change_board(self, packet, user_hash, board_name):
+    def handle_change_board(self, packet, board_name, user_hash):
+        board_name = board_name.strip()
+        if not board_name:
+            self.reply_handler.send_link_reply(packet.link, "Usage: CHANGEBOARD <board_name>")
+            return
         board_exists = self.board_exists(board_name)
         current_board = self.users_mgr.get_user_board(user_hash)
         if not board_exists:
@@ -248,6 +244,10 @@ class BoardsManager:
             self.handle_list_messages(packet, current_board, user_hash, page=current_page - 1)
 
     def handle_read_message(self, packet, message_id, user_hash):
+        message_id = message_id.strip()
+        if not message_id:
+            self.reply_handler.send_link_reply(packet.link, "Usage: READ <message_id>")
+            return
         try:
             message = self.get_message_by_id(message_id)
             if message:
@@ -352,9 +352,12 @@ class BoardsManager:
             self.reply_handler.send_link_reply(packet.link, f"Error replying to message ID {message_id}: {e}")
             RNS.log(f"[BoardsManager] Error in reply command: {e}", RNS.LOG_ERROR)
     
-    def handle_new_board(self, packet, remainder, user_hash):
+    def is_admin(self, user_hash):
         user_info = self.users_mgr.get_user(user_hash)
-        if not user_info.get("is_admin", False):
+        return user_info.get("is_admin", False)
+    
+    def handle_new_board(self, packet, remainder, user_hash):
+        if not self.is_admin(user_hash):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can create boards.")
             return
         board_name = remainder.strip()
@@ -368,8 +371,7 @@ class BoardsManager:
         self.reply_handler.send_link_reply(packet.link, f"Board '{board_name}' is ready.")
     
     def handle_delete_board(self, packet, remainder, user_hash):
-        user_info = self.users_mgr.get_user(user_hash)
-        if not user_info.get("is_admin", False):
+        if not self.is_admin(user_hash):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can delete boards.")
             return
         board_name = remainder.strip()
