@@ -1,10 +1,10 @@
-╔════════════════════════════════════════════════════════════════════════╗
-║ == Message Boards ==                                                   ║
-║                                                                        ║
-║ ?  | help         - Show help text                                     ║
-║ b  | back         - Back to Main Menu                                  ║
-║ lb | listboards   - List all boards available                          ║
-║ cb | changeboard  - Switch to a message board                          ║
-║ p  | post         - Post a message                                     ║
-║ lm | listmessages - List messages in 'boardname' or your current board ║
-╚════════════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║ == Message Boards ==                                         ║
+║ - Global Commands -                                          ║
+║                                                              ║
+║ ?  | help                     - Show help text               ║
+║ b  | back                     - Back to Main Menu            ║
+║ lb | listboards               - List all boards available    ║
+║ cb | changeboard              - Switch to a message board    ║
+║ lm | listmessages \[boardname] - List messages in 'boardname' ║
+╚══════════════════════════════════════════════════════════════╝
