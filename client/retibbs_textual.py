@@ -3,7 +3,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import threading
 import time
 
@@ -476,14 +475,6 @@ class RetiBBSClient(App):
             try:
                 text = message_bytes.decode("utf-8", "ignore")
                 self.write_log(f"{text}")
-
-                match = re.search(r"You have joined board '(.+)'", text)
-                if match:
-                    board_name = match.group(1)
-                    self.current_board = board_name
-                elif "You are not in any board." in text:
-                    self.current_board = "None"
-                self.update_connection_status()
             except UnicodeDecodeError as e:
                 self.write_log(f"[ERROR] Error decoding packet data: {e}")
                 self.write_log(f"[ERROR] Non-UTF-8 packet data: {message_bytes.data.hex()}")
