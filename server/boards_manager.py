@@ -233,7 +233,7 @@ class BoardsManager:
             self.reply_handler.send_link_reply(packet.link, "You are already on the last page.")
         else:
             self.user_pages[user_hash] = current_page + 1
-            self.handle_list_messages(packet, current_board, page=current_page + 1)
+            self.handle_list_messages(packet, current_board, user_hash, page=current_page + 1)
 
     def handle_prev_page(self, packet, user_hash):
         current_board = self.users_mgr.get_user_board(user_hash)
@@ -245,7 +245,7 @@ class BoardsManager:
             self.reply_handler.send_link_reply(packet.link, "You are already on the first page.")
         else:
             self.user_pages[user_hash] = current_page - 1
-            self.handle_list_messages(packet, current_board, page=current_page - 1)
+            self.handle_list_messages(packet, current_board, user_hash, page=current_page - 1)
 
     def handle_read_message(self, packet, message_id, user_hash):
         try:
