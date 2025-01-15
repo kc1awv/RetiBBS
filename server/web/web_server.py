@@ -91,3 +91,7 @@ def api_message(message_id):
         replies = boards_manager.list_replies(message_id)
         return render_template("message_modal.html", message=message, replies=replies)
     return "<p>Message not found</p>", 404
+
+@app.route("/about")
+def about():
+    return render_template("about.html")
