@@ -1,5 +1,7 @@
 {
     "server_name": "changeme",
     "announce_interval": 300,
-    "theme": "default"
+    "theme": "default",
+    "enable_web_server": false,
+    "use_wsgi": false
 }

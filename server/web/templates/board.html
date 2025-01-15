@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+    <h1 class="text-center">Message Board: {{ board_name }}</h1>
+    <ul class="list-group">
+        {% for message in messages %}
+        <li class="list-group-item">
+            <div>
+                <a href="#" class="view-message" data-message-id="{{ message.id }}"><strong>{{ message.topic }}</strong></a>
+            </div>
+            <div>
+                by {{ message.author }} on {{ message.timestamp | format_timestamp }}
+                <span class="badge bg-secondary">{{ message.reply_count }} {{ "reply" if message.reply_count == 1 else "replies" }}</span>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+
+    <div class="py-2">
+        {% if page > 1 %}
+        <a href="/board/{{ board_name }}?page={{ page - 1 }}">Previous</a>
+        {% endif %}
+        Page {{ page }} of {{ total_pages }}
+        {% if page < total_pages %}
+        <a href="/board/{{ board_name }}?page={{ page + 1 }}">Next</a>
+        {% endif %}
+    </div>
+
+    <a href="/">Back to Boards</a>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            // Attach click event to all message links
+            document.querySelectorAll(".view-message").forEach(function (element) {
+                element.addEventListener("click", function (event) {
+                    event.preventDefault(); // Prevent the default link behavior
+        
+                    // Get the message ID from the data attribute
+                    const messageId = this.getAttribute("data-message-id");
+        
+                    // Fetch the message content
+                    fetch(`/api/message/${messageId}`)
+                        .then(response => response.text())
+                        .then(html => {
+                            // Insert the content into the modal
+                            document.getElementById("modalContent").innerHTML = html;
+        
+                            // Show the modal
+                            const messageModal = new bootstrap.Modal(document.getElementById("messageModal"));
+                            messageModal.show();
+                        })
+                        .catch(error => {
+                            console.error("Error fetching message:", error);
+                        });
+                });
+            });
+        });
+        </script>
+
+{% endblock %}

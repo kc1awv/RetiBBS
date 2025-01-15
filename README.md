@@ -36,9 +36,14 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-2. Install Textual, Reticulum Network Stack, and LXMF:
+2. Install Reticulum Network Stack, LXMF, Textual, and Flask:
 ```sh
-pip install rns lxmf textual
+pip install rns lxmf textual flask
+```
+
+3. Install a WSGI server of your choice for the web server:
+```sh
+pip install gunicorn||uWSGI
 ```
 
 ## Usage
@@ -53,6 +58,12 @@ python retibbs_server.py [OPTIONS]
 - `--reticulum-config`: Path to alternative Reticulum config directory (optional)
 - `--identity-file`: Path to store/load server identity (default: server_identity.pem)
 - `--config-file`: Path to server config file (default: server_config.json)
+
+#### WSGI Web Server:
+If you wish to run the web server through a WSGI server, set the configuration options in the server config, and run the web server separately. For example, using gunicorn:
+```sh
+gunicorn --bind 0.0.0.0:5000 wsgi:retibbs_web
+```
 
 ### Running the Client
 ```sh
@@ -93,7 +104,9 @@ Each area has its own set of commands. Use `?` or `help` to get a list of comman
 {
     "server_name": "changeme",
     "announce_interval": 300,
-    "theme": "default"
+    "theme": "default",
+    "enable_web_server": false,
+    "use_wsgi": false
 }
 ```
 
@@ -127,6 +140,10 @@ will produce this on the client:
 ![Client with color](meta/client_color.png)
 
 Clients not up to date with at least commit `26bc656` will show the markup. If you see the markup code where colors are expected, please pull the latest commit.
+
+### Web Interface
+
+The RetiBBS Server has an optional read-only web server for viewing message boards, and the messages within. To enable the web server, you must at least set the configuration option `enable_web_server` to `True`, and optionally enable WSGI operation (more stable this way) with the `use_wsgi` configuration option set to `True`.
 
 ### Client Address Book (address_book.json)
 Saved servers are stored in JSON format with server names and hashes.
