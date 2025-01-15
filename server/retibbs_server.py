@@ -3,6 +3,7 @@ import argparse
 import os
 import json
 import sys
+import threading
 
 import RNS
 
@@ -14,13 +15,24 @@ from main_menu import MainMenuHandler
 from reply_handler import ReplyHandler
 from theme_manager import ThemeManager
 from users_manager import UsersManager
+from web.web_server import WebServer
 
 class RetiBBSServer:
-    def __init__(self, configpath, identity_file, server_name, announce_interval):
+    def __init__(
+            self,
+            configpath,
+            identity_file,
+            server_name,
+            announce_interval,
+            enable_web_server,
+            use_wsgi
+        ):
         self.configpath = configpath
         self.identity_file = identity_file
         self.server_name = server_name
         self.announce_interval = announce_interval
+        self.enable_web_server = enable_web_server
+        self.use_wsgi = use_wsgi
         self.users_mgr = UsersManager()
         self.reply_handler = ReplyHandler()
         self.theme_mgr = ThemeManager()
@@ -28,10 +40,14 @@ class RetiBBSServer:
         self.theme_mgr.load_theme()
         self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler, None, self.theme_mgr)
         self.boards_mgr = BoardsManager(self.users_mgr, self.reply_handler, None, self.theme_mgr)
+        self.web_server = None
         self.latest_client_link = None
         self.server_identity = None
         self.server_destination = None
         self.announcer = None
+        
+        if enable_web_server and not use_wsgi:
+            self.web_server = WebServer(self.boards_mgr, self.server_name)
 
         self.server_setup()
 
@@ -69,7 +85,20 @@ class RetiBBSServer:
             self.announcer.start()
             RNS.log(f"[Server] Automatic announce set to every {announce_interval} seconds.", RNS.LOG_INFO)
 
+    def start_web_server(self):
+        """
+        Start the web server in a separate thread.
+        """
+        if self.use_wsgi:
+            RNS.log("[Server] Using WSGI mode, skipping web server start.", RNS.LOG_INFO)
+        elif self.web_server:
+            RNS.log("[Server] Starting Flask development web server...", RNS.LOG_INFO)
+            web_thread = threading.Thread(target=self.web_server.start, daemon=True)
+            web_thread.start()
+
     def run(self):
+        if self.enable_web_server:
+            self.start_web_server()
         while True:
             try:
                 RNS.log("[Server] Waiting for incoming connections... Press Enter to send an ANNOUNCE.", RNS.LOG_INFO)
@@ -138,9 +167,6 @@ class RetiBBSServer:
         self.users_mgr.set_user_area(identity_hash_hex, "main_menu")
         self.users_mgr.set_user_board(identity_hash_hex, None)
 
-        #user_name = self.user_mgr.get_user("name", RNS.prettyhexrep(bytes.fromhex(identity_hash_hex)))
-        #welcome_str = f"Welcome, {user_name} to the {server_name} RetiBBS Server!\n"
-        #reply = f"{welcome_str}You are at the main menu. Use '?' for help."
         welcome_message = self.theme_mgr.apply_theme(self)
 
         self.reply_handler.send_clear_screen(link)
@@ -230,17 +256,33 @@ if __name__ == "__main__":
                     server_config = json.load(f)
                 server_name = server_config.get("server_name", "RetiBBS Server")
                 announce_interval = server_config.get("announce_interval", 0)
+                enable_web_server = server_config.get("enable_web_server", False)
+                use_wsgi = server_config.get("use_wsgi", False)
                 RNS.log(f"[Server] Loaded server name: '{server_name}' from {args.config_file}", RNS.LOG_INFO)
+                RNS.log(f"[Server] Loaded announce interval: {announce_interval} seconds from {args.config_file}", RNS.LOG_INFO)
+                RNS.log(f"[Server] Loaded web server enabled: {enable_web_server} from {args.config_file}", RNS.LOG_INFO)
+                RNS.log(f"[Server] Loaded WSGI mode enabled: {use_wsgi} from {args.config_file}", RNS.LOG_INFO)
             except Exception as e:
                 RNS.log(f"[Server] Could not load server configuration: {e}", RNS.LOG_ERROR)
                 server_name = "RetiBBS Server"
                 announce_interval = 0
+                enable_web_server = False
+                use_wsgi = False
         else:
             RNS.log(f"[Server] Configuration file {args.config_file} not found. Using defaults.", RNS.LOG_WARNING)
             server_name = "RetiBBS Server"
             announce_interval = 0
+            enable_web_server = False
+            use_wsgi = False
 
-        server = RetiBBSServer(args.reticulum_config, args.identity_file, server_name, announce_interval)
+        server = RetiBBSServer(
+            args.reticulum_config,
+            args.identity_file,
+            server_name,
+            announce_interval,
+            enable_web_server,
+            use_wsgi
+        )
         server.run()
 
     except Exception as e:

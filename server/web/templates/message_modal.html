@@ -1,0 +1,20 @@
+<p class="lead">Topic: {{ message.topic }}</p>
+<p class="blockquote-footer">
+    {{ message.author }} on {{ message.timestamp | format_timestamp }}
+</p>
+
+<p>{{ message.content }}</p>
+
+{% if replies %}
+<h6>Replies</h6>
+<ul>
+    {% for reply in replies %}
+    <li>
+        <strong>{{ reply.author }}</strong> on {{ reply.timestamp | format_timestamp }}:<br>
+        {{ reply.content }}
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p>No replies yet.</p>
+{% endif %}

@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<h1 class="text-center">Welcome to {{ server_name }}</h1>
+<p>Browse the message boards below:</p>
+<ul class="list-group">
+    {% for board in boards %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+            <a href="/board/{{ board.name }}">{{ board.name }}</a>
+            {% if board.last_message_time %}
+            <br><small>Last post by {{ board.last_message_author }} on {{ board.last_message_time | format_timestamp }}</small>
+            {% else %}
+            <br><small>No messages yet</small>
+            {% endif %}
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+
+{% endblock %}
