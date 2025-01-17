@@ -13,6 +13,7 @@ RetiBBS allows users to communicate through message boards in a secure manner.
 - User display names
 - Admin privileges for board management
 - Simple text-based command interface
+- Ephemeral chat room support
 
 ## Reference Implementation
 
@@ -88,6 +89,7 @@ Main Menu:
   d  | destination <LXMF Address> - Set LXMF destination for board alerts
   td | testdestination            - Send a test LXMF message
   b  | boards                     - Switch to message boards area
+  c  | chat                       - Switch to chat room area
   lo | logout                     - Log out from the system
 
 ### Admin Commands
