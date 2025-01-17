@@ -272,6 +272,32 @@ class UsersManager:
         if user_hash not in self.user_sessions:
             self.user_sessions[user_hash] = {}
         self.user_sessions[user_hash]["current_board"] = board
+    
+    def get_user_room(self, user_hash):
+        """
+        Retrieve the current room for a user.
+        :param user_hash: The user's hash_hex.
+        """
+        if user_hash in self.user_sessions:
+            return self.user_sessions[user_hash].get("current_room", None)
+        
+    def set_user_room(self, user_hash, room):
+        """
+        Set the current room for a user.
+        :param user_hash: The user's hash_hex.
+        :param room: The room name.
+        """
+        if user_hash not in self.user_sessions:
+            self.user_sessions[user_hash] = {}
+        self.user_sessions[user_hash]["current_room"] = room
+    
+    def remove_user_room(self, user_hash):
+        """
+        Remove the current room for a user.
+        :param user_hash: The user's hash_hex.
+        """
+        if user_hash in self.user_sessions and "current_room" in self.user_sessions[user_hash]:
+            del self.user_sessions[user_hash]["current_room"]
 
     def remove_user_session(self, user_hash):
         """

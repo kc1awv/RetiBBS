@@ -250,6 +250,8 @@ class RetiBBSClient(App):
                 status += f" | {self.current_area}"
                 if hasattr(self, "current_board") and self.current_board:
                     status += f" | Board: {self.current_board}"
+                elif hasattr(self, "current_room") and self.current_room:
+                    status += f" | Room: {self.current_room}"
         else:
             indicator = Text("\u2715  ", style="bold red")
             status = "Not Connected"
@@ -470,8 +472,11 @@ class RetiBBSClient(App):
                 area_name = decoded_message[len("CTRL AREA "):].strip()
                 self.current_area = area_name
                 self.write_debug_log(f"[INFO] Area update: {area_name}")
-                if self.current_area != "Message Boards":
+                #if self.current_area != "Message Boards":
+                #    self.current_board = None
+                if self.current_area == "Main Menu":
                     self.current_board = None
+                    self.current_room = None
                 self.update_connection_status()
             except Exception as e:
                 self.write_log(f"[SERVER-PACKET] Error processing area update: {e}")
@@ -484,6 +489,15 @@ class RetiBBSClient(App):
                 self.update_connection_status()
             except Exception as e:
                 self.write_log(f"[SERVER-PACKET] Error processing board update: {e}")
+        elif message_bytes.startswith(b"CTRL ROOM"):
+            try:
+                decoded_message = message_bytes.decode("utf-8")
+                room_name = decoded_message[len("CTRL ROOM "):].strip()
+                self.current_room = room_name
+                self.write_debug_log(f"[INFO] Room update: {room_name}")
+                self.update_connection_status()
+            except Exception as e:
+                self.write_log(f"[SERVER-PACKET] Error processing room update: {e}")
         else:
             try:
                 text = message_bytes.decode("utf-8", "ignore")
@@ -497,7 +511,7 @@ class RetiBBSClient(App):
     async def on_input_submitted(self, message: Input.Submitted):
         command = message.value.strip()
         if command:
-            self.write_log(f"\nCommand: {command}")
+            self.write_debug_log(f"\nCommand: {command}")
             if self.link and self.link.status == RNS.Link.ACTIVE:
                 try:
                     packet = RNS.Packet(self.link, command.encode("utf-8"))

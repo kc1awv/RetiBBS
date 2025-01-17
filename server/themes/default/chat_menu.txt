@@ -1,0 +1,16 @@
+╔═════════════════════════════════════════╗
+║ == Chat ==                              ║
+║ - Global Commands -                     ║
+║                                         ║
+║ /?             - Show help text         ║
+║ /b             - Back to Main Menu      ║
+║ /j <room>      - Join Chat Room         ║
+║ /l             - Leave Chat Room        ║
+║ /list          - List open rooms        ║
+║ <message>      - Send a message to room ║
+║                                         ║
+║ [red]!NB!: Rooms with zero users are closed,[/] ║
+║ [red]and will not show up in the list.[/]       ║
+║                                         ║
+║ To create a new room, /join it.         ║
+╚═════════════════════════════════════════╝

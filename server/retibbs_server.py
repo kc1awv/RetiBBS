@@ -9,6 +9,7 @@ import RNS
 
 from automatic_announcer import AutomaticAnnouncer
 from boards_manager import BoardsManager
+from chat.chat_manager import ChatManager
 from identity_manager import IdentityManager
 from lxmf_handler import LXMFHandler
 from main_menu import MainMenuHandler
@@ -38,7 +39,8 @@ class RetiBBSServer:
         self.theme_mgr = ThemeManager()
         self.theme_mgr.load_config()
         self.theme_mgr.load_theme()
-        self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler, None, self.theme_mgr)
+        self.chat_mgr = ChatManager(self.users_mgr, self.reply_handler, None, self.theme_mgr)
+        self.main_menu_handler = MainMenuHandler(self.users_mgr, self.reply_handler, None, self.theme_mgr, self.chat_mgr)
         self.boards_mgr = BoardsManager(self.users_mgr, self.reply_handler, None, self.theme_mgr)
         self.web_server = None
         self.latest_client_link = None
@@ -147,8 +149,13 @@ class RetiBBSServer:
     def client_disconnected(self, link):
         RNS.log("[Server] Client disconnected.", RNS.LOG_DEBUG)
         remote_identity = link.get_remote_identity()
-        self.users_mgr.remove_user_session(remote_identity.hash.hex())
-        RNS.log(f"[Server] Removed user session for {RNS.prettyhexrep(bytes.fromhex(remote_identity.hash.hex()))}", RNS.LOG_DEBUG)
+        try:
+            self.chat_mgr.leave_room(remote_identity.hash.hex())
+            self.chat_mgr.unregister_user_link(remote_identity.hash.hex())
+            self.users_mgr.remove_user_session(remote_identity.hash.hex())
+            RNS.log(f"[Server] Removed user session for {RNS.prettyhexrep(bytes.fromhex(remote_identity.hash.hex()))}", RNS.LOG_DEBUG)
+        except Exception as e:
+            RNS.log(f"[Server] Error removing user session", RNS.LOG_ERROR)
 
     def remote_identified(self, link, identity):
         identity_hash_hex = identity.hash.hex()
@@ -163,6 +170,7 @@ class RetiBBSServer:
 
         self.users_mgr.set_user_area(identity_hash_hex, "main_menu")
         self.users_mgr.set_user_board(identity_hash_hex, None)
+        self.chat_mgr.register_user_link(identity_hash_hex, link)
 
         welcome_message = self.theme_mgr.apply_theme(self)
 
@@ -214,6 +222,8 @@ class RetiBBSServer:
                 self.main_menu_handler.handle_main_menu_commands(msg_str, packet, identity_hash_hex)
             elif user_area == "boards":
                 self.boards_mgr.handle_board_commands(msg_str, packet, identity_hash_hex)
+            elif user_area == "chat":
+                self.chat_mgr.handle_chat_commands(msg_str, packet, identity_hash_hex)
             else:
                 self.reply_handler.send_link_reply(packet.link, "ERROR: Unknown area.")
 

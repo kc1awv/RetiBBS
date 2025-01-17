@@ -7,5 +7,6 @@
 ║ d  | destination <LXMF Address> - Set LXMF destination for board alerts ║
 ║ td | testdestination            - Send a test LXMF message              ║
 ║ b  | boards                     - Switch to Message Boards              ║
+║ c  | chat                       - Switch to Chat Rooms                  ║
 ║ lo | logout                     - Log out                               ║
 ╚═════════════════════════════════════════════════════════════════════════╝
