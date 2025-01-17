@@ -79,3 +79,18 @@ class ReplyHandler:
             RNS.log(f"[ReplyHandler] Sent board update: {board_name}", RNS.LOG_DEBUG)
         except Exception as e:
             RNS.log(f"[ReplyHandler] Error sending board update: {e}", RNS.LOG_ERROR)
+
+    @staticmethod
+    def send_room_update(link, room_name):
+        """
+        Send a room update command to a link.
+        :param link: The link to send the command to.
+        :param room_name: The board to switch to.
+        """
+        try:
+            control_packet = f"CTRL ROOM {room_name}".encode("utf-8")
+            packet = RNS.Packet(link, control_packet)
+            packet.send()
+            RNS.log(f"[ReplyHandler] Sent room update: {room_name}", RNS.LOG_DEBUG)
+        except Exception as e:
+            RNS.log(f"[ReplyHandler] Error sending board update: {e}", RNS.LOG_ERROR)

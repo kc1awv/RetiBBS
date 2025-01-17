@@ -3,11 +3,12 @@ import asyncio
 import RNS
 
 class MainMenuHandler:
-    def __init__(self, users_manager, reply_handler, lxmf_handler, theme_manager):
+    def __init__(self, users_manager, reply_handler, lxmf_handler, theme_manager, chat_manager):
         self.users_mgr = users_manager
         self.reply_handler = reply_handler
         self.lxmf_handler = lxmf_handler
         self.theme_mgr = theme_manager
+        self.chat_mgr = chat_manager
 
     def handle_main_menu_commands(self, command, packet, user_hash):
         """
@@ -32,6 +33,8 @@ class MainMenuHandler:
             self.handle_test_destination(packet, user_hash)
         elif cmd in ["b", "boards"]:
             self.handle_boards(packet, user_hash)
+        elif cmd in ["c", "chat"]:
+            self.handle_chat(packet, user_hash)
         elif cmd in ["lo", "logout"]:
             self.handle_logout(packet)
         elif cmd in ["lu", "listusers"]:
@@ -153,6 +156,26 @@ class MainMenuHandler:
         current_board = self.users_mgr.get_user_board(user_hash)
         self.reply_handler.send_area_update(packet.link, "Message Boards")
         self.reply_handler.send_board_update(packet.link, current_board)
+    
+    def handle_chat(self, packet, user_hash):
+        """
+        Command to switch to the chat area.
+        """
+        if self.users_mgr.get_user_area(user_hash) != "chat":
+            self.chat_mgr.register_user_link(user_hash, packet.link)
+            self.reply_handler.send_clear_screen(packet.link)
+            chat_menu_message = self.theme_mgr.theme_files.get("header.txt", "Welcome to the Chat Room!")
+            chat_menu_message += "\n"
+            chat_menu_message += self.theme_mgr.theme_files.get(
+                "chat_menu.txt", 
+                "Chat Menu: [/?] Help [/b] Back [/j] Join [/l] Leave [/msg] Post Message"
+            )
+            self.reply_handler.send_resource_reply(packet.link, chat_menu_message)
+            self.users_mgr.set_user_area(user_hash, area="chat")
+        else:
+            self.reply_handler.send_link_reply(packet.link, "You are already in the chat area.")
+        self.reply_handler.send_area_update(packet.link, "Chat")
+        self.reply_handler.send_room_update(packet.link, self.users_mgr.get_user_room(user_hash))
 
     def handle_logout(self, packet):
         """
