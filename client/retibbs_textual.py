@@ -233,6 +233,10 @@ class RetiBBSClient(App):
         except Exception as e:
             self.write_debug_log(f"[QUIT] Error during cleanup: {e}")
         finally:
+            try:
+                RNS.exit()
+            except SystemExit:
+                self.write_debug_log("[QUIT] Program exited via Reticulum.")
             self.exit()
 
     def action_show_help(self):
@@ -426,7 +430,10 @@ class RetiBBSClient(App):
         self.write_log("Disconnected from the RetiBBS server.")
 
     def on_resource_started(self, resource):
-        self.write_log(f"[RESOURCE] Started: {resource.id} (size={resource.size})")
+        input_box = self.query_one("#command_input", Input)
+        input_box.disabled = True
+        input_box.placeholder = "Receiving Data..."
+        #DEBUG: self.write_debug_log(f"[RESOURCE] Started (size={resource.size})")
 
     def on_resource_concluded(self, resource):
         if resource.data is not None:
@@ -436,10 +443,16 @@ class RetiBBSClient(App):
                 data = fileobj.read()
                 text = data.decode("utf-8", "ignore")
                 self.write_log(f"{text}")
+                #DEBUG: self.write_debug_log(f"[RESOURCE] Received data (size={resource.size})")
             except Exception as e:
                 self.write_log(f"[RESOURCE] Error processing resource data: {e}")
         else:
             self.write_log("Transfer concluded, but no data received!")
+
+        input_box = self.query_one("#command_input", Input)
+        input_box.disabled = False
+        input_box.placeholder = "Enter command..."
+        input_box.focus()
 
     def on_packet_received(self, message_bytes, packet):
         if message_bytes == b"PONG":
