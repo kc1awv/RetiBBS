@@ -35,13 +35,8 @@ class UsersManager:
     def is_name_taken(self, name, exclude_hash_hex=None):
         """
         Checks if a name is already taken by another user.
-
-        Args:
-            name (str): The name to check.
-            exclude_hash_hex (str, optional): A hash_hex to exclude from the check.
-
-        Returns:
-            bool: True if the name is taken, False otherwise.
+        :param name: The name to check.
+        :param exclude_hash_hex: Optional hash_hex to exclude from the check.
         """
         with self.lock:
             try:
@@ -64,6 +59,12 @@ class UsersManager:
                 conn.close()
 
     def add_user(self, hash_hex, name=None, is_admin=False):
+        """
+        Add a new user to the database.
+        :param hash_hex: The user's hash_hex.
+        :param name: Optional display name.
+        :param is_admin: Optional admin flag.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -82,6 +83,10 @@ class UsersManager:
                 conn.close()
 
     def get_user(self, hash_hex):
+        """
+        Retrieve a user by their hash_hex.
+        :param hash_hex: The user's hash_hex.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -107,6 +112,7 @@ class UsersManager:
     def get_user_by_name(self, name):
         """
         Retrieve a user by their name.
+        :param name: The user's name
         """
         with self.lock:
             try:
@@ -133,17 +139,20 @@ class UsersManager:
     def get_user_display(self, hash_hex):
         """
         Returns the user's name if it exists, otherwise returns the hash_hex.
+        :param hash_hex: The user's hash_hex.
         """
         user = self.get_user(hash_hex)
         if user and user["name"]:
             return user["name"]
         return RNS.prettyhexrep(bytes.fromhex(hash_hex))
-    
-    #def get_user_area(self, user_hash):
-    #    user = self.get_user(user_hash)
-    #    return user.get("current_area", "main_menu")
 
     def update_user(self, hash_hex, name=None, is_admin=None):
+        """
+        Update a user's information.
+        :param hash_hex: The user's hash_hex.
+        :param name: Optional new display name.
+        :param is_admin: Optional new admin flag.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -172,6 +181,9 @@ class UsersManager:
                 conn.close()
 
     def list_users(self):
+        """
+        List all users in the database.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -185,6 +197,11 @@ class UsersManager:
                 conn.close()
 
     def set_user_destination_address(self, user_hash, destination_address):
+        """
+        Set a user's LXMF destination address.
+        :param user_hash: The user's hash_hex.
+        :param destination_address: The destination address.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -202,6 +219,10 @@ class UsersManager:
                 conn.close()
 
     def get_user_destination_address(self, user_hash):
+        """
+        Retrieve a user's LXMF destination address.
+        :param user_hash: The user's hash_hex.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -218,24 +239,45 @@ class UsersManager:
                 conn.close()
 
     def get_user_area(self, user_hash):
+        """
+        Retrieve the current area for a user.
+        :param user_hash: The user's hash_hex.
+        """
         if user_hash in self.user_sessions:
             return self.user_sessions[user_hash].get("current_area", "main_menu")
     
     def set_user_area(self, user_hash, area):
+        """
+        Set the current area for a user.
+        :param user_hash: The user's hash_hex.
+        """
         if user_hash not in self.user_sessions:
             self.user_sessions[user_hash] = {}
         self.user_sessions[user_hash]["current_area"] = area
 
     def get_user_board(self, user_hash):
+        """
+        Retrieve the current board for a user.
+        :param user_hash: The user's hash_hex.
+        """
         if user_hash in self.user_sessions:
             return self.user_sessions[user_hash].get("current_board", None)
         
     def set_user_board(self, user_hash, board):
+        """
+        Set the current board for a user.
+        :param user_hash: The user's hash_hex.
+        :param board: The board name.
+        """
         if user_hash not in self.user_sessions:
             self.user_sessions[user_hash] = {}
         self.user_sessions[user_hash]["current_board"] = board
 
     def remove_user_session(self, user_hash):
+        """
+        Remove a user's session.
+        :param user_hash: The user's hash_hex.
+        """
         if user_hash in self.user_sessions:
             del self.user_sessions[user_hash]
         else:

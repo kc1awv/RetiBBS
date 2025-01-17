@@ -13,7 +13,9 @@ class ThemeManager:
         self.theme_files = {}
 
     def load_config(self):
-        """Load the configuration file to get the selected theme."""
+        """
+        Load the configuration file to get the selected theme.
+        """
         if os.path.exists(self.config_file):
             with open(self.config_file, "r", encoding="utf-8") as file:
                 config = json.load(file)
@@ -22,7 +24,9 @@ class ThemeManager:
             self.selected_theme = self.default_theme
 
     def load_theme(self):
-        """Load theme files based on the selected theme."""
+        """
+        Load theme files based on the selected theme.
+        """
         theme_path = os.path.join(self.theme_folder, self.selected_theme)
 
         if not os.path.exists(theme_path):
@@ -39,7 +43,10 @@ class ThemeManager:
         self.theme_files = theme_files
 
     def apply_theme(self, server):
-        """Apply the loaded theme files to the server."""
+        """
+        Apply the loaded theme files to the server.
+        :param server: The server to apply the theme to.
+        """
         welcome_message = self.theme_files.get("welcome_message.txt", "Welcome to the RetiBBS Server!")
         main_menu_message = self.theme_files.get("main_menu.txt", "Main Menu: [?] Help [h] Hello [n] Name [b] Boards Area [lo] Log Out")
         boards_menu_message = self.theme_files.get("boards_menu.txt", "Boards Menu: [?] Help [b] Back [lb] List Boards [cb] Change Board [p] Post Message [lm] List Messages")

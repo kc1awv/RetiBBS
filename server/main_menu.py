@@ -10,6 +10,9 @@ class MainMenuHandler:
         self.theme_mgr = theme_manager
 
     def handle_main_menu_commands(self, command, packet, user_hash):
+        """
+        Handle commands in the main menu area.
+        """
         tokens = command.split(None, 1)
         if not tokens:
             self.reply_handler.send_link_reply(packet.link, "UNKNOWN COMMAND\n")
@@ -39,6 +42,9 @@ class MainMenuHandler:
             self.reply_handler.send_link_reply(packet.link, "UNKNOWN COMMAND. Use '?' for help.")
 
     def handle_help(self, packet, user_hash):
+        """
+        Command to show the main menu help text.
+        """
         user = self.users_mgr.get_user(user_hash)
         reply = (
             "You are in the main menu.\n\n"
@@ -60,6 +66,9 @@ class MainMenuHandler:
         self.reply_handler.send_resource_reply(packet.link, reply)
 
     def handle_hello(self, packet, user_hash):
+        """
+        Command to check authorization and display user information.
+        """
         user = self.users_mgr.get_user(user_hash)
         user_display_name = user.get("name", user_hash)
         reply = f"Hello, {user_display_name}."
@@ -73,6 +82,9 @@ class MainMenuHandler:
         self.reply_handler.send_link_reply(packet.link, reply)
 
     def handle_name(self, packet, remainder, user_hash):
+        """
+        Command to set a user's display name.
+        """
         proposed_name = remainder.strip()
         if not proposed_name:
             self.reply_handler.send_link_reply(packet.link, "NAME command requires a non-empty name.")
@@ -123,6 +135,9 @@ class MainMenuHandler:
             self.reply_handler.send_link_reply(packet.link, f"Error sending test LXMF message: {e}")
 
     def handle_boards(self, packet, user_hash):
+        """
+        Command to switch to the message boards area.
+        """
         if self.users_mgr.get_user_area(user_hash) != "boards":
             self.reply_handler.send_clear_screen(packet.link)
             boards_menu_message = self.theme_mgr.theme_files.get("header.txt", "Welcome to the Message Boards!")
@@ -140,10 +155,16 @@ class MainMenuHandler:
         self.reply_handler.send_board_update(packet.link, current_board)
 
     def handle_logout(self, packet):
+        """
+        Command to log out the user.
+        """
         self.reply_handler.send_link_reply(packet.link, "You have been logged out. Goodbye!\n")
         packet.link.teardown()
     
     def handle_list_users(self, packet, user_hash):
+        """
+        Admin command to list all users.
+        """
         user = self.users_mgr.get_user(user_hash)
         if not user.get("is_admin", False):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can list users.")
@@ -161,6 +182,9 @@ class MainMenuHandler:
         self.reply_handler.send_resource_reply(packet.link, reply)
     
     def handle_admin(self, packet, remainder, user_hash):
+        """
+        Admin command to assign admin rights to a user.
+        """
         user = self.users_mgr.get_user(user_hash)
         if not user.get("is_admin", False):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can assign admin rights.")

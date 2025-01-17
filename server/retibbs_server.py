@@ -86,9 +86,6 @@ class RetiBBSServer:
             RNS.log(f"[Server] Automatic announce set to every {announce_interval} seconds.", RNS.LOG_INFO)
 
     def start_web_server(self):
-        """
-        Start the web server in a separate thread.
-        """
         if self.use_wsgi:
             RNS.log("[Server] Using WSGI mode, skipping web server start.", RNS.LOG_INFO)
         elif self.web_server:
@@ -177,10 +174,6 @@ class RetiBBSServer:
         self.reply_handler.send_resource_reply(link, main_menu_message)
     
     def lxmf_delivery_callback(self, message):
-        """
-        Callback for LXMF delivery events.
-        :param message: The LXMF message that was delivered.
-        """
         RNS.log(f"[LXMF] Message delivered: {message.title if message.title else 'No Title'}", RNS.LOG_INFO)
 
     def server_packet_received(self, message_bytes, packet):

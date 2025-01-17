@@ -6,6 +6,11 @@ class ReplyHandler:
 
     @staticmethod
     def send_link_reply(link, text):
+        """
+        Send a reply to a link.
+        :param link: The link to reply to.
+        :param text: The text to send.
+        """
         try:
             data = text.encode("utf-8")
             if link.destination.hash == RNS.Transport.identity.hash:
@@ -19,6 +24,11 @@ class ReplyHandler:
 
     @staticmethod
     def send_resource_reply(link, text):
+        """
+        Send a resource reply to a link.
+        :param link: The link to reply to.
+        :param text: The text to send.
+        """
         try:
             data = text.encode("utf-8")
             resource = RNS.Resource(data, link)
@@ -28,6 +38,10 @@ class ReplyHandler:
     
     @staticmethod
     def send_clear_screen(link):
+        """
+        Send a clear screen command to a link.
+        :param link: The link to send the command to.
+        """
         try:
             control_packet = b"CTRL CLS"
             packet = RNS.Packet(link, control_packet)
@@ -38,6 +52,11 @@ class ReplyHandler:
 
     @staticmethod
     def send_area_update(link, area):
+        """
+        Send an area update command to a link.
+        :param link: The link to send the command to.
+        :param area: The area to switch to.
+        """
         try:
             control_packet = f"CTRL AREA {area}".encode("utf-8")
             packet = RNS.Packet(link, control_packet)
@@ -48,6 +67,11 @@ class ReplyHandler:
 
     @staticmethod
     def send_board_update(link, board_name):
+        """
+        Send a board update command to a link.
+        :param link: The link to send the command to.
+        :param board_name: The board to switch to.
+        """
         try:
             control_packet = f"CTRL BOARD {board_name}".encode("utf-8")
             packet = RNS.Packet(link, control_packet)

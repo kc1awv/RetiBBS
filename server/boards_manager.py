@@ -20,6 +20,9 @@ class BoardsManager:
         self._initialize_database()
 
     def _initialize_database(self):
+        """
+        Initialize the SQLite database.
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -114,6 +117,8 @@ class BoardsManager:
     def handle_help(self, packet, user_hash):
         """
         Show help text for the boards area.
+        :param packet: The incoming packet.
+        :param user_hash: The user's hash.
         """
         user = self.users_mgr.get_user(user_hash)
         reply = (
@@ -145,6 +150,8 @@ class BoardsManager:
     def handle_back(self, packet, user_hash):
         """
         Return to the main menu.
+        :param packet: The incoming packet.
+        :param user_hash: The user's hash.
         """
         self.reply_handler.send_clear_screen(packet.link)
         self.users_mgr.set_user_area(user_hash, area="main_menu")
@@ -160,6 +167,7 @@ class BoardsManager:
     def handle_list_boards(self, packet):
         """
         List all boards.
+        :param packet: The incoming packet.
         """
         names = self.list_boards()
         if not names:
@@ -171,6 +179,7 @@ class BoardsManager:
     def board_exists(self, board_name):
         """
         Check if a board exists.
+        :param board_name: The name of the board.
         """
         with self.lock:
             try:
@@ -188,6 +197,9 @@ class BoardsManager:
     def handle_change_board(self, packet, board_name, user_hash):
         """
         Change the user's current board.
+        :param packet: The incoming packet.
+        :param board_name: The name of the board to change to.
+        :param user_hash: The user's hash.
         """
         board_name = board_name.strip()
         if not board_name:
@@ -214,6 +226,9 @@ class BoardsManager:
     def handle_watch(self, packet, board_name, user_hash):
         """
         Add a board to the user's watchlist.
+        :param packet: The incoming packet.
+        :param board_name: The name of the board to watch.
+        :param user_hash: The user's hash.
         """
         board_name = board_name.strip()
         if not board_name:
@@ -235,6 +250,9 @@ class BoardsManager:
     def handle_unwatch(self, packet, board_name, user_hash):
         """
         Remove a board from the user's watchlist.
+        :param packet: The incoming packet.
+        :param board_name: The name of the board to unwatch.
+        :param user_hash: The user's hash.
         """
         board_name = board_name.strip()
         if not board_name:
@@ -252,6 +270,8 @@ class BoardsManager:
     def handle_watchlist(self, packet, user_hash):
         """
         List the boards a user is watching.
+        :param packet: The incoming packet.
+        :param user_hash: The user's hash.
         """
         try:
             watchlist = self.list_watchlist(user_hash)
@@ -266,6 +286,11 @@ class BoardsManager:
     def handle_list_messages(self, packet, remainder, user_hash, page=None, page_size=10):
         """
         List messages in a board.
+        :param packet: The incoming packet.
+        :param remainder: The remainder of the command.
+        :param user_hash: The user's hash.
+        :param page: The page number.
+        :param page_size: The number of messages per page.
         """
         board_name = remainder.strip()
         if not board_name:
@@ -297,6 +322,8 @@ class BoardsManager:
     def handle_list_unread_messages(self, packet, user_hash):
         """
         List unread messages in the user's current board.
+        :param packet: The incoming packet.
+        :param user_hash: The user's hash.
         """
         board_name = self.users_mgr.get_user_board(user_hash)
         if not board_name:
@@ -316,6 +343,8 @@ class BoardsManager:
     def handle_next_page(self, packet, user_hash):
         """
         Go to the next page of messages in the current board.
+        :param packet: The incoming packet.
+        :param user_hash: The user's hash.
         """
         current_board = self.users_mgr.get_user_board(user_hash)
         if not current_board:
@@ -332,6 +361,8 @@ class BoardsManager:
     def handle_prev_page(self, packet, user_hash):
         """
         Go to the previous page of messages in the current board.
+        :param packet: The incoming packet.
+        :param user_hash: The user's hash.
         """
         current_board = self.users_mgr.get_user_board(user_hash)
         if not current_board:
@@ -347,6 +378,9 @@ class BoardsManager:
     def handle_read_message(self, packet, message_id, user_hash):
         """
         Read a message by ID.
+        :param packet: The incoming packet.
+        :param message_id: The ID of the message to read.
+        :param user_hash: The user's hash.
         """
         message_id = message_id.strip()
         if not message_id:
@@ -382,6 +416,8 @@ class BoardsManager:
     def mark_message_as_read(self, user_hash, message_id):
         """
         Mark a message as read for a user.
+        :param user_hash: The user's hash.
+        :param message_id: The ID of the message.
         """
         with self.lock:
             try:
@@ -401,6 +437,9 @@ class BoardsManager:
     def handle_post_message(self, packet, remainder, user_hash):
         """
         Post a message to a board.
+        :param packet: The incoming packet.
+        :param remainder: The remainder of the command.
+        :param user_hash: The user's hash.
         """
         post_text = remainder.strip()
         if not post_text:
@@ -437,6 +476,9 @@ class BoardsManager:
     def handle_reply(self, packet, remainder, user_hash):
         """
         Reply to a message.
+        :param packet: The incoming packet.
+        :param remainder: The remainder of the command.
+        :param user_hash: The user's hash.
         """
         if "|" not in remainder:
             self.reply_handler.send_link_reply(packet.link, "Usage: REPLY <message_id> | <content>")
@@ -470,6 +512,7 @@ class BoardsManager:
     def is_admin(self, user_hash):
         """
         Check if a user is an admin.
+        :param user_hash: The user's hash.
         """
         user_info = self.users_mgr.get_user(user_hash)
         return user_info.get("is_admin", False)
@@ -477,6 +520,9 @@ class BoardsManager:
     def handle_new_board(self, packet, remainder, user_hash):
         """
         Create a new board.
+        :param packet: The incoming packet.
+        :param remainder: The remainder of the command.
+        :param user_hash: The user's hash.
         """
         if not self.is_admin(user_hash):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can create boards.")
@@ -494,6 +540,9 @@ class BoardsManager:
     def handle_delete_board(self, packet, remainder, user_hash):
         """
         Delete a board.
+        :param packet: The incoming packet.
+        :param remainder: The remainder of the command.
+        :param user_hash: The user's hash.
         """
         if not self.is_admin(user_hash):
             self.reply_handler.send_link_reply(packet.link, "ERROR: Only admins can delete boards.")
@@ -513,6 +562,11 @@ class BoardsManager:
     def post_message(self, board_name, author, topic, content, parent_id=None):
         """
         Post a message to a board.
+        :param board_name: The name of the board.
+        :param author: The author of the message.
+        :param topic: The topic of the message.
+        :param content: The content of the message.
+        :param parent_id: The ID of the parent message, if any.
         """
         with self.lock:
             try:
@@ -539,6 +593,10 @@ class BoardsManager:
     def notify_watchers(self, board_name, topic, content, author):
         """
         Notify users watching a board about a new post.
+        :param board_name: The name of the board.
+        :param topic: The topic of the post.
+        :param content: The content of the post.
+        :param author: The author of the post.
         """
         with self.lock:
             try:
@@ -568,6 +626,10 @@ class BoardsManager:
     def notify_message_author(self, parent_message, topic, content, replier):
         """
         Notify the author of a message about a new reply.
+        :param parent_message: The parent message.
+        :param topic: The topic of the reply.
+        :param content: The content of the reply.
+        :param replier: The author of the reply.
         """
         try:
             author = parent_message["author"]
@@ -611,6 +673,9 @@ class BoardsManager:
     def list_messages(self, board_name, page=1, page_size=10):
         """
         List messages in a board.
+        :param board_name: The name of the board.
+        :param page: The page number.
+        :param page_size: The number of messages per page.
         """
         with self.lock:
             try:
@@ -656,6 +721,8 @@ class BoardsManager:
     def list_unread_messages(self, board_name, user_hash):
         """
         List all unread messages in a board for a user.
+        :param board_name: The name of the board.
+        :param user_hash: The user's hash.
         """
         with self.lock:
             try:
@@ -693,6 +760,7 @@ class BoardsManager:
     def get_message_by_id(self, message_id):
         """
         Retrieve a message by its ID.
+        :param message_id: The ID of the message.
         """
         with self.lock:
             try:
@@ -721,6 +789,8 @@ class BoardsManager:
     def add_to_watchlist(self, user_hash, board_name):
         """
         Add a board to the user's watchlist.
+        :param user_hash: The user's hash.
+        :param board_name: The name of the board.
         """
         with self.lock:
             try:
@@ -746,6 +816,8 @@ class BoardsManager:
     def remove_from_watchlist(self, user_hash, board_name):
         """
         Remove a board from the user's watchlist.
+        :param user_hash: The user's hash.
+        :param board_name: The name of the board.
         """
         with self.lock:
             try:
@@ -770,6 +842,7 @@ class BoardsManager:
     def list_watchlist(self, user_hash):
         """
         List all boards in the user's watchlist.
+        :param user_hash: The user's hash.
         """
         with self.lock:
             try:
@@ -792,6 +865,7 @@ class BoardsManager:
     def list_replies(self, parent_id):
         """
         List all replies to a message.
+        :param parent_id: The ID of the parent message.
         """
         with self.lock:
             try:
@@ -819,6 +893,7 @@ class BoardsManager:
     def create_board(self, board_name):
         """
         Create a new message board.
+        :param board_name: The name of the board.
         """
         with self.lock:
             try:
@@ -837,6 +912,7 @@ class BoardsManager:
     def delete_board(self, board_name):
         """
         Delete a message board.
+        :param board_name: The name of the board.
         """
         with self.lock:
             try:
