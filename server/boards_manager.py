@@ -5,6 +5,7 @@ import sqlite3
 import threading
 
 from datetime import datetime, timezone
+from rich.markup import escape
 
 import RNS
 
@@ -309,7 +310,7 @@ class BoardsManager:
                 for message in posts:
                     timestamp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(message["timestamp"]))
                     lines.append(
-                        f"[{message['id']}] {timestamp_str} | {message['author']} | {message['topic']} "
+                        f"[{message['id']}] {timestamp_str} | {escape(message['author'])} | {escape(message['topic'])} "
                         f"({message['reply_count']} replies)"
                     )
                 lines.append("\nCommands: 'r <id>' to read a message, < (prev) || > (next) for navigation.")
@@ -336,7 +337,7 @@ class BoardsManager:
             lines = [f"Unread messages in board '{board_name}':"]
             for m in unread_messages:
                 t_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(m["timestamp"]))
-                lines.append(f"[{m['id']}] {t_str} | {m['author']} | {m['topic']}")
+                lines.append(f"[{m['id']}] {t_str} | {escape(m['author'])} | {escape(m['topic'])}")
             reply = "\n".join(lines)
         self.reply_handler.send_resource_reply(packet.link, reply)
 
@@ -393,17 +394,17 @@ class BoardsManager:
                 reply = (
                     f"\n[bold]----- Message {message_id} -----[/]\n"
                     f"Timestamp: {t_str}\n"
-                    f"Author: {message['author']}\n"
-                    f"Topic: {message['topic']}\n"
+                    f"Author: {escape(message['author'])}\n"
+                    f"Topic: {escape(message['topic'])}\n"
                     "\n"
-                    f"{message['content']}\n"
+                    f"{escape(message['content'])}\n"
                 )
                 replies = self.list_replies(message_id)
                 if replies:
                     reply += "\nReplies:\n"
                     for r in replies:
                         r_t_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["timestamp"]))
-                        reply += f"  [{r['id']}] {r_t_str} | {r['author']}: {r['content']}\n"
+                        reply += f"  [{r['id']}] {r_t_str} | {escape(r['author'])}: {escape(r['content'])}\n"
                 reply += "\nTo reply, use: reply <message_id> | <content>"
                 self.mark_message_as_read(user_hash, message_id)
             else:
@@ -467,7 +468,7 @@ class BoardsManager:
             return
         try:
             self.post_message(board_name, author, topic, content)
-            reply = f"Posted to board '{board_name}': [{topic}] {content}"
+            reply = f"Posted to board '{board_name}': [{escape(topic)}] {escape(content)}"
             self.reply_handler.send_link_reply(packet.link, reply)
             self.notify_watchers(board_name, topic, content, author)
         except Exception as e:

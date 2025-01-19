@@ -1,4 +1,5 @@
 import asyncio
+from rich.markup import escape
 
 import RNS
 
@@ -74,7 +75,7 @@ class MainMenuHandler:
         """
         user = self.users_mgr.get_user(user_hash)
         user_display_name = user.get("name", user_hash)
-        reply = f"Hello, {user_display_name}."
+        reply = f"Hello, {escape(user_display_name)}."
         if user.get("is_admin", False):
             reply += "\nYou have ADMIN rights."
         destination_address = user.get("destination_address")
@@ -94,11 +95,11 @@ class MainMenuHandler:
             return
 
         if self.users_mgr.is_name_taken(proposed_name, exclude_hash_hex=user_hash):
-            self.reply_handler.send_link_reply(packet.link, f"ERROR: The name '{proposed_name}' is already taken.")
+            self.reply_handler.send_link_reply(packet.link, f"ERROR: The name '{escape(proposed_name)}' is already taken.")
             return
 
         self.users_mgr.update_user(user_hash, name=proposed_name)
-        self.reply_handler.send_link_reply(packet.link, f"Your display name is now set to '{proposed_name}'.")
+        self.reply_handler.send_link_reply(packet.link, f"Your display name is now set to '{escape(proposed_name)}'.")
 
     def handle_set_destination_address(self, packet, remainder, user_hash):
         """
@@ -201,7 +202,7 @@ class MainMenuHandler:
             for user in user_list:
                 name = user["name"] if user["name"] else "N/A"
                 admin_status = " (Admin)" if user["is_admin"] else ""
-                reply += f"- {user['hash_hex']} | {name}{admin_status}\n"
+                reply += f"- {user['hash_hex']} | {escape(name)} {admin_status}\n"
         self.reply_handler.send_resource_reply(packet.link, reply)
     
     def handle_admin(self, packet, remainder, user_hash):
@@ -225,4 +226,4 @@ class MainMenuHandler:
 
         self.users_mgr.update_user(target_hash, is_admin=True)
         target_display_name = self.users_mgr.get_user_display(target_hash)
-        self.reply_handler.send_link_reply(packet.link, f"User {target_display_name} has been granted admin rights.")
+        self.reply_handler.send_link_reply(packet.link, f"User {escape(target_display_name)} has been granted admin rights.")

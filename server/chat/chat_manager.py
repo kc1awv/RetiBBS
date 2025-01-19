@@ -1,3 +1,5 @@
+from rich.markup import escape
+
 import RNS
 
 class ChatRoom:
@@ -29,7 +31,7 @@ class ChatRoom:
         """
         for user_hash in self.clients:
             if user_hash != sender:
-                self.chat_manager.broadcast_to_user(user_hash, f"[{self.name}] {message}")
+                self.chat_manager.broadcast_to_user(user_hash, f"[{escape(self.name)}] {escape(message)}")
                 RNS.log(f"[ChatRoom] Broadcast to {user_hash}: {message}", RNS.LOG_DEBUG)
 
 class ChatManager:
@@ -190,9 +192,9 @@ class ChatManager:
             room = self.rooms.get(current_room_name)
             if room:
                 user_display_name = self.users_mgr.get_user_display(user_hash)
-                room.broadcast(f"{user_display_name}: {message.strip()}", sender=user_hash)
+                room.broadcast(f"{escape(user_display_name)}: {escape(message.strip())}", sender=user_hash)
                 RNS.log(f"[ChatManager] Broadcast to {current_room_name}: {message.strip()}", RNS.LOG_DEBUG)
-                self.reply_handler.send_link_reply(packet.link, f"[{current_room_name}] (You): {message.strip()}")
+                self.reply_handler.send_link_reply(packet.link, f"[{current_room_name}] (You): {escape(message.strip())}")
             else:
                 self.reply_handler.send_link_reply(packet.link, "ERROR: Chat room not found.")
         else:
@@ -230,8 +232,9 @@ class ChatManager:
             user_display_name = self.users_mgr.get_user_display(user_hash)
             if room:
                 is_empty = room.remove_client(user_hash)
-                room.broadcast(f"{user_display_name} has left the room.")
+                room.broadcast(f"{escape(user_display_name)} has left the room.")
                 if is_empty:
                     del self.rooms[current_room_name]
                     RNS.log(f"[ChatManager] Removed empty room: {current_room_name}", RNS.LOG_DEBUG)
             self.users_mgr.set_user_room(user_hash, None)
+            self.reply_handler.send_room_update(self.user_links[user_hash], None)
