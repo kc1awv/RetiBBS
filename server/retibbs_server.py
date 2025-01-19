@@ -124,14 +124,7 @@ class RetiBBSServer:
                 RNS.log("[Server] Automatic announcer stopped.", RNS.LOG_INFO)
             except Exception as e:
                 RNS.log(f"[Server] Error stopping automatic announcer: {e}", RNS.LOG_ERROR)
-        RNS.log("[Server] Shutting down Reticulum...", RNS.LOG_INFO)
-        try:
-            RNS.Reticulum.exit_handler()
-        except Exception as e:
-            RNS.log(f"[Server] Error during Reticulum shutdown: {e}", RNS.LOG_ERROR)
-        RNS.log("[Server] Logs flushed, exiting...", RNS.LOG_INFO)
-        sys.stdout.flush()
-        sys.stderr.flush()
+        RNS.log("[Server] Closing Reticulum connections and shutting down...", RNS.LOG_INFO)
 
     def client_connected(self, link):
         RNS.log("[Server] Client link established!", RNS.LOG_DEBUG)
