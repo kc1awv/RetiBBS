@@ -231,11 +231,14 @@ class BoardsManager:
         :param board_name: The name of the board to watch.
         :param user_hash: The user's hash.
         """
-        board_name = board_name.strip()
-        if not board_name:
-            self.reply_handler.send_link_reply(packet.link, "Usage: WATCH <board_name>")
-            return
-
+        current_board = self.users_mgr.get_user_board(user_hash)
+        if not current_board:
+            if not board_name.strip():
+                self.reply_handler.send_link_reply(packet.link, "Usage: WATCH <board_name>")
+                return
+            board_name = board_name.strip()
+        else:
+            board_name = current_board
         try:
             destination_address = self.users_mgr.get_user_destination_address(user_hash)
             if not destination_address:
@@ -255,11 +258,14 @@ class BoardsManager:
         :param board_name: The name of the board to unwatch.
         :param user_hash: The user's hash.
         """
-        board_name = board_name.strip()
-        if not board_name:
-            self.reply_handler.send_link_reply(packet.link, "Usage: UNWATCH <board_name>")
-            return
-
+        current_board = self.users_mgr.get_user_board(user_hash)
+        if not current_board:
+            if not board_name.strip():
+                self.reply_handler.send_link_reply(packet.link, "Usage: UNWATCH <board_name>")
+                return
+            board_name = board_name.strip()
+        else:
+            board_name = current_board
         try:
             self.remove_from_watchlist(user_hash, board_name)
             self.reply_handler.send_link_reply(packet.link, f"Board '{board_name}' removed from your watchlist.")
